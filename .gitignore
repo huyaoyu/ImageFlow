@@ -1,0 +1,4 @@
+*.pyc
+*.dat
+data/
+*.code-workspace
