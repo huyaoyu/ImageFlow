@@ -1,0 +1,17 @@
+{
+    "dataDir": "./data/test/blockworld_move_yaw_planner",
+    "startingIdx": 0,
+    "idxStep": 2,
+    "poseFilename": "pose_name.json",
+    "poseName": "pose_name",
+    "poseData": "pose_wo_name.npy",
+    "outDir": "ImageFlow",
+    "depthDir": "depth_plan",
+    "depthSuffix": "_depth",
+    "depthExt": ".npy",
+    "camera": {
+        "focal": 320,
+        "imageSize": [360, 640]
+    },
+    "distanceRange": 50
+}

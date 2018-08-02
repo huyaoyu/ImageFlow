@@ -7,10 +7,13 @@ import json
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.linalg as LA
+import os
 
 from ColorMapping import color_map
 
 # Global variables used as constants.
+
+INPUT_JSON = "./IFInput.json"
 
 # DATA_DIR      = "./data/test/blockworld_move_x_planner"
 # # x planner.
@@ -270,93 +273,137 @@ class CameraBase(object):
         return coor
 
 if __name__ == "__main__":
-    _, poseIDs = load_IDs_JSON(POSE_FILENAME, POSE_NAME)
-    poseData   = np.load(POSE_DATA)
+    # Read the JSON input file.
+    fpJSON = open(INPUT_JSON, "r")
+    if ( fpJSON is None ):
+        print("%s could not be opened." % (INPUT_JSON))
+        # Handle the error.
+
+    inputParams = json.load(fpJSON)
+
+    fpJSON.close()
+
+    # Data directory.
+    dataDir = inputParams["dataDir"]
+
+    # Load the pose filenames and the pose data.
+    _, poseIDs = load_IDs_JSON(\
+        dataDir + "/" + inputParams["poseFilename"], inputParams["poseName"])
+    poseData   = np.load( dataDir + "/" + inputParams["poseData"] )
+
     # print(poseData.shape)
     print("poseData and poseFilenames loaded.")
 
     # Camera.
-    cam_0 = CameraBase(CAM_FOCAL, IMAGE_SIZE)
+    cam_0 = CameraBase(inputParams["camera"]["focal"], inputParams["camera"]["imageSize"])
     print(cam_0.imageSize)
     print(cam_0.cameraMatrix)
 
     # We are assuming that the cameras at the two poses are the same camera.
     cam_1 = cam_0
 
-    # Get the pose of the first position.
-    R0, t0, q0= get_pose_by_ID(POSE_ID_0, poseIDs, poseData)
-    R0Inv = LA.inv(R0)
+    # Get the number of loops.
+    nPoses = len( poseIDs )
 
-    print("t0 = \n{}".format(t0))
-    print("q0 = \n{}".format(q0))
-    print("R0 = \n{}".format(R0))
-    print("R0Inv = \n{}".format(R0Inv))
+    # Loop over the poses.
+    poseID_0, poseID_1 = None, None
+    idxStep       = inputParams["idxStep"]
+    outDirBase    = dataDir + "/" + inputParams["outDir"]
+    depthDir      = dataDir + "/" + inputParams["depthDir"]
+    depthTail     = inputParams["depthSuffix"] + inputParams["depthExt"]
+    distanceRange = inputParams["distanceRange"]
 
-    # Get the pose of the second position.
-    R1, t1, q1 = get_pose_by_ID(POSE_ID_1, poseIDs, poseData)
-    R1Inv = LA.inv(R1)
+    for i in range( inputParams["startingIdx"] + idxStep,\
+        nPoses, idxStep ):
 
-    print("t1 = \n{}".format(t1))
-    print("q1 = \n{}".format(q1))
-    print("R1 = \n{}".format(R1))
-    print("R1Inv = \n{}".format(R1Inv))
+        print("i = %d" % (i))
 
-    # Compute the rotation between the two camera poses.
-    R = np.matmul( R1, R0Inv )
-    print("R = \n{}".format(R))
+        poseID_0 = poseIDs[ i - idxStep ]
+        poseID_1 = poseIDs[ i ]
 
-    # Load the depth of the first image.
-    depth_0 = np.load( DEPTH_DIR + "/" + POSE_ID_0 + DEPTH_SUFFIX + DEPTH_EXT )
-    np.savetxt( OUT_DIR + "/depth_0.dat", depth_0, fmt="%.2e")
+        outDir = outDirBase + "/" + poseID_0
 
-    # Calculate the coordinates in the first camera's frame.
-    X0 = cam_0.from_depth_to_x_y(depth_0)
+        if ( os.path.isdir(outDir) ):
+            pass
+        else:
+            os.makedirs(outDir)
 
-    output_to_ply(OUT_DIR + '/XInCam_0.ply', X0, cam_0.imageSize, DISTANCE_RANGE)
+        # Get the pose of the first position.
+        R0, t0, q0= get_pose_by_ID(poseID_0, poseIDs, poseData)
+        R0Inv = LA.inv(R0)
 
-    # The coordinates in the world frame.
-    XWorld_0  = R0Inv.dot(X0 - t0)
-    output_to_ply(OUT_DIR + "/XInWorld_0.ply", XWorld_0, cam_1.imageSize, DISTANCE_RANGE)
+        print("t0 = \n{}".format(t0))
+        print("q0 = \n{}".format(q0))
+        print("R0 = \n{}".format(R0))
+        print("R0Inv = \n{}".format(R0Inv))
 
-    # Load the depth of the second image.
-    depth_1 = np.load( DEPTH_DIR + "/" + POSE_ID_1 + DEPTH_SUFFIX + DEPTH_EXT )
-    np.savetxt( OUT_DIR + "/depth_1.dat", depth_1, fmt="%.2e")
+        # Get the pose of the second position.
+        R1, t1, q1 = get_pose_by_ID(poseID_1, poseIDs, poseData)
+        R1Inv = LA.inv(R1)
 
-    # Calculate the coordinates in the second camera's frame.
-    X1 = cam_1.from_depth_to_x_y(depth_1)
+        print("t1 = \n{}".format(t1))
+        print("q1 = \n{}".format(q1))
+        print("R1 = \n{}".format(R1))
+        print("R1Inv = \n{}".format(R1Inv))
 
-    output_to_ply(OUT_DIR + "/XInCam_1.ply", X1, cam_1.imageSize, DISTANCE_RANGE)
+        # Compute the rotation between the two camera poses.
+        R = np.matmul( R1, R0Inv )
+        print("R = \n{}".format(R))
 
-    # The coordiantes in the world frame.
-    XWorld_1 = R1Inv.dot( X1 - t1 )
-    output_to_ply(OUT_DIR + "/XInWorld_1.ply", XWorld_1, cam_1.imageSize, DISTANCE_RANGE)
+        # Load the depth of the first image.
+        depth_0 = np.load( depthDir + "/" + poseID_0 + depthTail )
+        np.savetxt( outDir + "/depth_0.dat", depth_0, fmt="%.2e")
 
-    # ====================================
-    # The coordinate in the seconde camera's frame.
-    X_01 = R1.dot(XWorld_0) + t1
-    output_to_ply(OUT_DIR + '/X_01.ply', X_01, cam_0.imageSize, DISTANCE_RANGE)
+        # Calculate the coordinates in the first camera's frame.
+        X0 = cam_0.from_depth_to_x_y(depth_0)
 
-    # The image coordinates in the second camera.
-    c = cam_0.from_camera_frame_to_image(X_01)
+        output_to_ply(outDir + '/XInCam_0.ply', X0, cam_0.imageSize, distanceRange)
 
-    # Get new u anv v
-    u = c[0, :].reshape(cam_0.imageSize)
-    v = c[1, :].reshape(cam_0.imageSize)
-    np.savetxt(OUT_DIR + "/u.dat", u, fmt="%4d")
-    np.savetxt(OUT_DIR + "/v.dat", v, fmt="%4d")
+        # The coordinates in the world frame.
+        XWorld_0  = R0Inv.dot(X0 - t0)
+        output_to_ply(outDir + "/XInWorld_0.ply", XWorld_0, cam_1.imageSize, distanceRange)
 
-    # Get the du and dv.
-    du, dv = du_dv(u, v, cam_0.imageSize)
+        # Load the depth of the second image.
+        depth_1 = np.load( depthDir + "/" + poseID_1 + depthTail )
+        np.savetxt( outDir + "/depth_1.dat", depth_1, fmt="%.2e")
 
-    # Save.
-    np.savetxt(OUT_DIR + "/du.dat", du.astype(np.int), fmt="%+3d")
-    np.savetxt(OUT_DIR + "/dv.dat", dv.astype(np.int), fmt="%+3d")
+        # Calculate the coordinates in the second camera's frame.
+        X1 = cam_1.from_depth_to_x_y(depth_1)
 
-    a = np.arctan2( dv, du ) / np.pi * 180
+        output_to_ply(outDir + "/XInCam_1.ply", X1, cam_1.imageSize, distanceRange)
 
-    d = np.sqrt( du * du + dv * dv )
+        # The coordiantes in the world frame.
+        XWorld_1 = R1Inv.dot( X1 - t1 )
+        output_to_ply(outDir + "/XInWorld_1.ply", XWorld_1, cam_1.imageSize, distanceRange)
 
-    np.savetxt(OUT_DIR + "/a.dat", a, fmt="%+.2e")
-    np.savetxt(OUT_DIR + "/d.dat", d, fmt="%+.2e")
+        # ====================================
+        # The coordinate in the seconde camera's frame.
+        X_01 = R1.dot(XWorld_0) + t1
+        output_to_ply(outDir + '/X_01.ply', X_01, cam_0.imageSize, distanceRange)
 
-    show(a, d, (cam_0.imageSize[0], cam_0.imageSize[1], 3))
+        # The image coordinates in the second camera.
+        c = cam_0.from_camera_frame_to_image(X_01)
+
+        # Get new u anv v
+        u = c[0, :].reshape(cam_0.imageSize)
+        v = c[1, :].reshape(cam_0.imageSize)
+        np.savetxt(outDir + "/u.dat", u, fmt="%4d")
+        np.savetxt(outDir + "/v.dat", v, fmt="%4d")
+
+        # Get the du and dv.
+        du, dv = du_dv(u, v, cam_0.imageSize)
+
+        # Save.
+        np.savetxt(outDir + "/du.dat", du.astype(np.int), fmt="%+3d")
+        np.savetxt(outDir + "/dv.dat", dv.astype(np.int), fmt="%+3d")
+
+        a = np.arctan2( dv, du ) / np.pi * 180
+
+        d = np.sqrt( du * du + dv * dv )
+
+        np.savetxt(outDir + "/a.dat", a, fmt="%+.2e")
+        np.savetxt(outDir + "/d.dat", d, fmt="%+.2e")
+
+        # show(a, d, (cam_0.imageSize[0], cam_0.imageSize[1], 3))
+
+        print("Done with i = %d" % (i))
