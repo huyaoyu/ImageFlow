@@ -2,24 +2,31 @@
 from __future__ import print_function
 
 import copy
+import cv2
+import json
+import matplotlib.pyplot as plt
 import numpy as np
 import numpy.linalg as LA
 
-import cv2
-import matplotlib.pyplot as plt
+from ColorMapping import color_map
 
-DATA_DIR      = "./data/test"
-POSE_FILENAME = DATA_DIR + "/pose_filename.txt"
+# Global variables used as constants.
+
+DATA_DIR      = "./data/test/TranslationOnly"
+POSE_FILENAME = DATA_DIR + "/pose_ID.json"
 POSE_DATA     = DATA_DIR + "/pose_data.txt"
 
-DEPTH_SUFFIX = "_depth"
-DEPTH_EXT    = ".npy"
+DEPTH_SUFFIX  = "_depth"
+DEPTH_EXT     = ".npy"
 
-POSE_ID_0 = "000211_316623"
-POSE_ID_1 = "000212_317028"
+# POSE_ID_0     = "000211_316623"
+# POSE_ID_1     = "000212_317028"
 
-CAM_FOCAL  = 320
-IMAGE_SIZE = (360, 640)
+POSE_ID_0     = "000000_219784"
+POSE_ID_1     = "000058_228385"
+
+CAM_FOCAL     = 320
+IMAGE_SIZE    = (360, 640)
 
 ply_header = '''ply
 format ascii 1.0
@@ -33,7 +40,14 @@ property uchar blue
 end_header
 '''
 
+PLY_COLORS = [\
+    "#2980b9",\
+    "#27ae60",\
+    "#f39c12",\
+    "#c0392b",\
+    ]
 
+PLY_COLOR_LEVELS = 20
 
 def write_ply(fn, verts, colors):
     verts  = verts.reshape(-1, 3)
@@ -60,21 +74,31 @@ def depth_to_color(depth, limit = None):
 
     return color
 
-def output_to_ply(fn, X, colors, imageSize, rLimit):
+def output_to_ply(fn, X, imageSize, rLimit):
     vertices = np.zeros(( imageSize[0], imageSize[1], 3 ), dtype = np.float)
     vertices[:, :, 0] = X[0, :].reshape(imageSize)
     vertices[:, :, 1] = X[1, :].reshape(imageSize)
     vertices[:, :, 2] = X[2, :].reshape(imageSize)
     
     vertices = vertices.reshape((-1, 3))
-    colors = colors.reshape((-1,3))
 
     r = LA.norm(vertices, axis=1).reshape((-1,1))
     mask = r < rLimit
-
     mask = mask.reshape(( mask.size ))
 
-    write_ply(fn, vertices[mask, :], colors[mask, :])
+    r = r[ mask ]
+
+    cr, cg, cb = color_map(r, PLY_COLORS, PLY_COLOR_LEVELS)
+
+    colors = np.zeros( (r.size, 3), dtype = np.uint8 )
+
+    # import ipdb; ipdb.set_trace()
+
+    colors[:, 0] = cr.reshape( cr.size )
+    colors[:, 1] = cg.reshape( cr.size )
+    colors[:, 2] = cb.reshape( cr.size )
+
+    write_ply(fn, vertices[mask, :], colors)
 
 def load_IDs(fn):
     fp = open(fn, "r")
@@ -93,6 +117,19 @@ def load_IDs(fn):
         IDs.append( l[:-2] )
 
     return 0, IDs
+
+def load_IDs_JSON(fn):
+    fp = open(fn, "r")
+
+    if ( fp is None ):
+        print("Could not open %s" % (fn))
+        return -1
+    
+    dict = json.load(fp)
+
+    fp.close()
+
+    return 0, dict["ID"]
 
 def from_quaternion_to_rotation_matrix(q):
     """
@@ -218,7 +255,7 @@ class CameraBase(object):
         return coor
 
 if __name__ == "__main__":
-    _, poseIDs = load_IDs(POSE_FILENAME)
+    _, poseIDs = load_IDs_JSON(POSE_FILENAME)
     poseData   = np.loadtxt(POSE_DATA, dtype = np.float)
     # print(poseData.shape)
     print("poseData and poseFilenames loaded.")
@@ -249,6 +286,12 @@ if __name__ == "__main__":
     R1, t1, q1 = get_pose_by_ID(POSE_ID_1, poseIDs, poseData)
     R1Inv = LA.inv(R1)
 
+    print("t1 = \n{}".format(t1))
+    print("q1 = \n{}".format(q1))
+    print("R1 = \n{}".format(R1))
+    print("R1Inv = \n{}".format(R1Inv))
+
+    # Compute the rotation between the two camera poses.
     R = np.matmul( R1, R0Inv )
     print("R = \n{}".format(R))
 
@@ -256,27 +299,27 @@ if __name__ == "__main__":
     depth_0 = np.load( DATA_DIR + "/" + POSE_ID_0 + DEPTH_SUFFIX + DEPTH_EXT )
     np.savetxt( DATA_DIR + "/depth_0.dat", depth_0, fmt="%.2e")
 
-    # Calculate the x and y coordinates int the first camera's frame.
+    # Calculate the coordinates in the first camera's frame.
     X0 = cam_0.from_depth_to_x_y(depth_0)
 
-    colors = depth_to_color(depth_0, 200)
-    output_to_ply(DATA_DIR + '/XInCam_0.ply', X0, colors, cam_0.imageSize, 200)
+    output_to_ply(DATA_DIR + '/XInCam_0.ply', X0, cam_0.imageSize, 200)
 
     # The coordinates in the world frame.
     XWorld_0  = R0Inv.dot(X0 - t0)
-    output_to_ply(DATA_DIR + "/XInWorld_0.ply", XWorld_0, colors, cam_1.imageSize, 200)
+    output_to_ply(DATA_DIR + "/XInWorld_0.ply", XWorld_0, cam_1.imageSize, 200)
 
     # Load the depth of the second image.
     depth_1 = np.load( DATA_DIR + "/" + POSE_ID_1 + DEPTH_SUFFIX + DEPTH_EXT )
     np.savetxt( DATA_DIR + "/depth_1.dat", depth_1, fmt="%.2e")
 
+    # Calculate the coordinates in the second camera's frame.
     X1 = cam_1.from_depth_to_x_y(depth_1)
 
-    colors = depth_to_color(depth_1, 200)
-    output_to_ply(DATA_DIR + "/XInCam_1.ply", X1, colors, cam_1.imageSize, 200)
+    output_to_ply(DATA_DIR + "/XInCam_1.ply", X1, cam_1.imageSize, 200)
 
+    # The coordiantes in the world frame.
     XWorld_1 = R1Inv.dot( X1 - t1 )
-    output_to_ply(DATA_DIR + "/XInWorld_1.ply", XWorld_1, colors, cam_1.imageSize, 200)
+    output_to_ply(DATA_DIR + "/XInWorld_1.ply", XWorld_1, cam_1.imageSize, 200)
 
     # ===
 
