@@ -280,13 +280,8 @@ if __name__ == "__main__":
     print(cam_0.imageSize)
     print(cam_0.cameraMatrix)
 
+    # We are assuming that the cameras at the two poses are the same camera.
     cam_1 = cam_0
-
-    # # Test the projection of the camera.
-    # X = np.array([ cam.imageSize[1], cam.imageSize[0], 2*cam.focal ]).reshape(3,1)
-    # x = cam.from_camera_frame_to_image(X)
-    # print(X)
-    # print(x)
 
     # Get the pose of the first position.
     R0, t0, q0= get_pose_by_ID(POSE_ID_0, poseIDs, poseData)
