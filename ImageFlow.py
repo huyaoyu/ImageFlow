@@ -12,21 +12,34 @@ from ColorMapping import color_map
 
 # Global variables used as constants.
 
-DATA_DIR      = "./data/test/TranslationOnly"
-POSE_FILENAME = DATA_DIR + "/pose_ID.json"
-POSE_DATA     = DATA_DIR + "/pose_data.txt"
+# DATA_DIR      = "./data/test/blockworld_move_x_planner"
+# # x planner.
+# POSE_ID_0     = "000000_532136"
+# POSE_ID_1     = "000019_538142"
 
+# # y planner.
+# DATA_DIR      = "./data/test/blockworld_move_y_planner"
+# POSE_ID_0     = "000000_566604"
+# POSE_ID_1     = "000021_573897"
+
+# yaw planner.
+DATA_DIR      = "./data/test/blockworld_move_yaw_planner"
+POSE_ID_0     = "000000_490248"
+POSE_ID_1     = "000013_496146"
+
+POSE_FILENAME = DATA_DIR + "/pose_name.json"
+POSE_DATA     = DATA_DIR + "/pose_wo_name.npy"
+OUT_DIR       = DATA_DIR + "/ImageFlow"
+POSE_NAME     = "pose_name"
+
+DEPTH_DIR     = DATA_DIR + "/depth_plan"
 DEPTH_SUFFIX  = "_depth"
 DEPTH_EXT     = ".npy"
 
-# POSE_ID_0     = "000211_316623"
-# POSE_ID_1     = "000212_317028"
-
-POSE_ID_0     = "000000_219784"
-POSE_ID_1     = "000058_228385"
-
 CAM_FOCAL     = 320
 IMAGE_SIZE    = (360, 640)
+
+DISTANCE_RANGE = 50
 
 ply_header = '''ply
 format ascii 1.0
@@ -118,7 +131,7 @@ def load_IDs(fn):
 
     return 0, IDs
 
-def load_IDs_JSON(fn):
+def load_IDs_JSON(fn, poseName = None):
     fp = open(fn, "r")
 
     if ( fp is None ):
@@ -129,7 +142,10 @@ def load_IDs_JSON(fn):
 
     fp.close()
 
-    return 0, dict["ID"]
+    if ( poseName is None ):
+        return 0, dict["ID"]
+    else:
+        return 0, dict[poseName]
 
 def from_quaternion_to_rotation_matrix(q):
     """
@@ -179,15 +195,14 @@ def du_dv(nu, nv, imageSize):
     return nu - u, nv - v
 
 def show(ang, mag, shape):
+    """ang: degree"""
     # Use Hue, Saturation, Value colour model 
     hsv = np.zeros(shape, dtype=np.uint8)
     hsv[..., 1] = 255
 
-    # mag, ang = cv2.cartToPolar(flow[..., 0], flow[..., 1])
-    a = ang * 180 / np.pi / 2
-    np.savetxt(DATA_DIR + "/ang180.dat", a, fmt="%.2e")
+    # mag, ang = cv2.cartToPolar(flow[..., 0], flow[..., 1]
 
-    hsv[..., 0] = (ang+np.pi) * 180 / np.pi / 2
+    hsv[..., 0] = (ang + 180)/ 2
     hsv[..., 2] = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX)
     rgb = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
 
@@ -255,8 +270,8 @@ class CameraBase(object):
         return coor
 
 if __name__ == "__main__":
-    _, poseIDs = load_IDs_JSON(POSE_FILENAME)
-    poseData   = np.loadtxt(POSE_DATA, dtype = np.float)
+    _, poseIDs = load_IDs_JSON(POSE_FILENAME, POSE_NAME)
+    poseData   = np.load(POSE_DATA)
     # print(poseData.shape)
     print("poseData and poseFilenames loaded.")
 
@@ -296,55 +311,57 @@ if __name__ == "__main__":
     print("R = \n{}".format(R))
 
     # Load the depth of the first image.
-    depth_0 = np.load( DATA_DIR + "/" + POSE_ID_0 + DEPTH_SUFFIX + DEPTH_EXT )
-    np.savetxt( DATA_DIR + "/depth_0.dat", depth_0, fmt="%.2e")
+    depth_0 = np.load( DEPTH_DIR + "/" + POSE_ID_0 + DEPTH_SUFFIX + DEPTH_EXT )
+    np.savetxt( OUT_DIR + "/depth_0.dat", depth_0, fmt="%.2e")
 
     # Calculate the coordinates in the first camera's frame.
     X0 = cam_0.from_depth_to_x_y(depth_0)
 
-    output_to_ply(DATA_DIR + '/XInCam_0.ply', X0, cam_0.imageSize, 200)
+    output_to_ply(OUT_DIR + '/XInCam_0.ply', X0, cam_0.imageSize, DISTANCE_RANGE)
 
     # The coordinates in the world frame.
     XWorld_0  = R0Inv.dot(X0 - t0)
-    output_to_ply(DATA_DIR + "/XInWorld_0.ply", XWorld_0, cam_1.imageSize, 200)
+    output_to_ply(OUT_DIR + "/XInWorld_0.ply", XWorld_0, cam_1.imageSize, DISTANCE_RANGE)
 
     # Load the depth of the second image.
-    depth_1 = np.load( DATA_DIR + "/" + POSE_ID_1 + DEPTH_SUFFIX + DEPTH_EXT )
-    np.savetxt( DATA_DIR + "/depth_1.dat", depth_1, fmt="%.2e")
+    depth_1 = np.load( DEPTH_DIR + "/" + POSE_ID_1 + DEPTH_SUFFIX + DEPTH_EXT )
+    np.savetxt( OUT_DIR + "/depth_1.dat", depth_1, fmt="%.2e")
 
     # Calculate the coordinates in the second camera's frame.
     X1 = cam_1.from_depth_to_x_y(depth_1)
 
-    output_to_ply(DATA_DIR + "/XInCam_1.ply", X1, cam_1.imageSize, 200)
+    output_to_ply(OUT_DIR + "/XInCam_1.ply", X1, cam_1.imageSize, DISTANCE_RANGE)
 
     # The coordiantes in the world frame.
     XWorld_1 = R1Inv.dot( X1 - t1 )
-    output_to_ply(DATA_DIR + "/XInWorld_1.ply", XWorld_1, cam_1.imageSize, 200)
+    output_to_ply(OUT_DIR + "/XInWorld_1.ply", XWorld_1, cam_1.imageSize, DISTANCE_RANGE)
 
-    # ===
+    # ====================================
+    # The coordinate in the seconde camera's frame.
+    X_01 = R1.dot(XWorld_0) + t1
+    output_to_ply(OUT_DIR + '/X_01.ply', X_01, cam_0.imageSize, DISTANCE_RANGE)
 
-    # X1 = R1.dot(X) + t1
+    # The image coordinates in the second camera.
+    c = cam_0.from_camera_frame_to_image(X_01)
 
-    # output_to_ply(DATA_DIR + '/X1.ply', X1, colors, cam.imageSize, 200)
+    # Get new u anv v
+    u = c[0, :].reshape(cam_0.imageSize)
+    v = c[1, :].reshape(cam_0.imageSize)
+    np.savetxt(OUT_DIR + "/u.dat", u, fmt="%4d")
+    np.savetxt(OUT_DIR + "/v.dat", v, fmt="%4d")
 
-    # # The image coordinates in the second camera.
-    # c = cam.from_camera_frame_to_image(X1)
+    # Get the du and dv.
+    du, dv = du_dv(u, v, cam_0.imageSize)
 
-    # # Get new u anv v
-    # u = c[0, :].reshape(cam.imageSize)
-    # v = c[1, :].reshape(cam.imageSize)
+    # Save.
+    np.savetxt(OUT_DIR + "/du.dat", du.astype(np.int), fmt="%+3d")
+    np.savetxt(OUT_DIR + "/dv.dat", dv.astype(np.int), fmt="%+3d")
 
-    # # Get the du and dv.
-    # du, dv = du_dv(u, v, cam.imageSize)
+    a = np.arctan2( dv, du ) / np.pi * 180
 
-    # np.savetxt(DATA_DIR + "/du.dat", du.astype(np.int), fmt="%3d")
-    # np.savetxt(DATA_DIR + "/dv.dat", dv.astype(np.int), fmt="%3d")
+    d = np.sqrt( du * du + dv * dv )
 
-    # a = np.arctan2( dv, du )
+    np.savetxt(OUT_DIR + "/a.dat", a, fmt="%+.2e")
+    np.savetxt(OUT_DIR + "/d.dat", d, fmt="%+.2e")
 
-    # d = np.sqrt( du * du + dv * dv )
-
-    # np.savetxt(DATA_DIR + "/a.dat", a, fmt="%.2e")
-    # np.savetxt(DATA_DIR + "/d.dat", d, fmt="%.2e")
-
-    # show(a, d, (cam.imageSize[0], cam.imageSize[1], 3))
+    show(a, d, (cam_0.imageSize[0], cam_0.imageSize[1], 3))
