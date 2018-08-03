@@ -175,7 +175,7 @@ def du_dv(nu, nv, imageSize):
 
     return nu - u, nv - v
 
-def show(ang, mag, outDir = None, waitTime = None):
+def show(ang, mag, outDir = None, waitTime = None, magFactor = 1.0, angShift = 0.0):
     """ang: degree"""
     # Use Hue, Saturation, Value colour model 
     hsv = np.zeros( ( ang.shape[0], ang.shape[1], 3 ) , dtype=np.uint8)
@@ -183,8 +183,8 @@ def show(ang, mag, outDir = None, waitTime = None):
 
     # mag, ang = cv2.cartToPolar(flow[..., 0], flow[..., 1]
 
-    hsv[..., 0] = (ang + 180)/ 2
-    hsv[..., 2] = np.clip(mag*10, 0, 255).astype(np.uint8) #cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX)
+    hsv[..., 0] = (ang + angShift)/ 2
+    hsv[..., 2] = np.clip(mag * magFactor, 0, 255).astype(np.uint8) #cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX)
     bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
 
     if ( outDir is not None ):
@@ -273,7 +273,10 @@ class CameraBase(object):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Compute the image flow data from sequence of camera poses and their depth information.')
 
-    parser.add_argument("--input", help = "The filename of the input json file.", default = INPUT_JSON)
+    parser.add_argument("--input", help = "The filename of the input JSON file.", default = INPUT_JSON)
+    parser.add_argument("--mf",\
+        help = "The iamge magnitude factor. If not specified, the value in the input JSON file will be used. Overwrite the value in the input JSON file is specifiec here.",\
+        default = -1.0, type = float)
     parser.add_argument("--debug", help = "Debug information including 3D point clouds will be written addintionally.", action = "store_true", default = False)
 
     args = parser.parse_args()
@@ -290,6 +293,12 @@ if __name__ == "__main__":
 
     # Data directory.
     dataDir = inputParams["dataDir"]
+
+    # The magnitude factor.
+    if ( args.mf < 0.0 ):
+        mf = inputParams["imageMagnitudeFactor"]
+    else:
+        mf = args.mf
 
     # Load the pose filenames and the pose data.
     _, poseIDs = load_IDs_JSON(\
@@ -421,8 +430,10 @@ if __name__ == "__main__":
 
         # Calculate the angle and distance.
         a = np.arctan2( dv, du )
+        angleShift = np.pi
         if ( True == flagDegree ):
             a = a / np.pi * 180
+            angleShift = 180
             print("Convert angle from radian to degree as demanded by the input file.")
 
         d = np.sqrt( du * du + dv * dv )
@@ -438,9 +449,9 @@ if __name__ == "__main__":
 
         # Show and save the resulting HSV image.
         if ( 1 == estimatedLoops ):
-            show(a, d, outDir)
+            show(a, d, outDir, mf, angleShift)
         else:
-            show(a, d, outDir, inputParams["imageWaitTimeMS"])
+            show(a, d, outDir, (int)(inputParams["imageWaitTimeMS"]), mf, angleShift)
 
         print("Done with i = %d" % ( i - idxStep ))
 
@@ -448,3 +459,6 @@ if __name__ == "__main__":
 
     show_delimiter("Summary.")
     print("%d poses, starting at idx = %d, step = %d, %d steps in total.\n" % (nPoses, inputParams["startingIdx"], idxStep, count))
+
+    if ( args.mf >= 0 ):
+        print( "Command line argument --mf %f overwrites the parameter \"imageMagnitudeFactor\" (%f) in the input JSON file.\n" % (mf, inputParams["imageMagnitudeFactor"]) )
