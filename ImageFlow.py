@@ -333,6 +333,7 @@ if __name__ == "__main__":
     idxStep       = inputParams["idxStep"]
     outDirBase    = dataDir + "/" + inputParams["outDir"]
     depthDir      = dataDir + "/" + inputParams["depthDir"]
+    imgDir        = dataDir + "/image"
     depthTail     = inputParams["depthSuffix"] + inputParams["depthExt"]
     distanceRange = inputParams["distanceRange"]
     flagDegree    = inputParams["flagDegree"]
@@ -457,9 +458,24 @@ if __name__ == "__main__":
         angleAndDist[:, :, 1] = d
         np.save(outDir + "/ad.npy", angleAndDist)
 
+        # warp the image to see the result -- amigo
+        # import ipdb; ipdb.set_trace()
+        cam0_img = cv2.imread(imgDir + "/" + poseID_0 + '_rgb.png')
+        warp_img = np.zeros_like(cam0_img)
+        for h in range(cam0_img.shape[0]):
+            for w in range(cam0_img.shape[1]):
+                u_w, v_w = int(round(u[h,w])), int(round(v[h,w]))
+                if u_w < cam0_img.shape[1] and v_w < cam0_img.shape[0] and u_w >= 0 and v_w >= 0:
+                    warp_img[v_w, u_w, :] = cam0_img[h, w, :]
+        
+        cv2.imwrite(imgDir + "/" + poseID_0 + '_warp.png', warp_img)
+        cv2.imshow('img', warp_img)
+        # The waitKey() will be executed in show() later.
+        # cv2.waitKey(0)
+
         # Show and save the resulting HSV image.
         if ( 1 == estimatedLoops ):
-            show(a, d, outDir, (int)(mf), angleShift)
+            show(a, d, outDir, None, angleShift)
         else:
             show(a, d, outDir, (int)(inputParams["imageWaitTimeMS"]), mf, angleShift)
 
