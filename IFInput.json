@@ -13,5 +13,6 @@
         "focal": 320,
         "imageSize": [360, 640]
     },
-    "distanceRange": 50
+    "distanceRange": 50,
+    "flagDegree": true
 }

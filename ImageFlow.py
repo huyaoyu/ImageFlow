@@ -1,6 +1,7 @@
 
 from __future__ import print_function
 
+import argparse
 import copy
 import cv2
 import json
@@ -14,35 +15,6 @@ from ColorMapping import color_map
 # Global variables used as constants.
 
 INPUT_JSON = "./IFInput.json"
-
-# DATA_DIR      = "./data/test/blockworld_move_x_planner"
-# # x planner.
-# POSE_ID_0     = "000000_532136"
-# POSE_ID_1     = "000019_538142"
-
-# # y planner.
-# DATA_DIR      = "./data/test/blockworld_move_y_planner"
-# POSE_ID_0     = "000000_566604"
-# POSE_ID_1     = "000021_573897"
-
-# yaw planner.
-DATA_DIR      = "./data/test/blockworld_move_yaw_planner"
-POSE_ID_0     = "000000_490248"
-POSE_ID_1     = "000013_496146"
-
-POSE_FILENAME = DATA_DIR + "/pose_name.json"
-POSE_DATA     = DATA_DIR + "/pose_wo_name.npy"
-OUT_DIR       = DATA_DIR + "/ImageFlow"
-POSE_NAME     = "pose_name"
-
-DEPTH_DIR     = DATA_DIR + "/depth_plan"
-DEPTH_SUFFIX  = "_depth"
-DEPTH_EXT     = ".npy"
-
-CAM_FOCAL     = 320
-IMAGE_SIZE    = (360, 640)
-
-DISTANCE_RANGE = 50
 
 ply_header = '''ply
 format ascii 1.0
@@ -64,6 +36,12 @@ PLY_COLORS = [\
     ]
 
 PLY_COLOR_LEVELS = 20
+
+def show_delimiter(title = "", c = "=", n = 50, leading = "\n", ending = "\n"):
+    d = [c for i in range(n/2)]
+    s = "".join(d) + " " + title + " " + "".join(d)
+
+    print("%s%s%s" % (leading, s, ending))
 
 def write_ply(fn, verts, colors):
     verts  = verts.reshape(-1, 3)
@@ -197,7 +175,7 @@ def du_dv(nu, nv, imageSize):
 
     return nu - u, nv - v
 
-def show(ang, mag, shape):
+def show(ang, mag, outDir):
     """ang: degree"""
     # Use Hue, Saturation, Value colour model 
     hsv = np.zeros(shape, dtype=np.uint8)
@@ -209,10 +187,26 @@ def show(ang, mag, shape):
     hsv[..., 2] = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX)
     rgb = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
 
-    np.savetxt(DATA_DIR + "/rgb.dat", rgb[:, :, 0], fmt="%3d")
+    np.savetxt(outDir + "/rgb.dat", rgb[:, :, 0], fmt="%3d")
 
     plt.imshow(rgb)
     plt.show()
+
+def estimate_loops(N, step):
+    """
+    N and step will be converted to integers.
+    step must less than N.
+    """
+
+    N = (int)( N )
+    step = (int)( step )
+
+    loops = N / step
+
+    if ( step * loops + 1 > N ):
+        loops -= 1
+
+    return loops
 
 class CameraBase(object):
     def __init__(self, focal, imageSize):
@@ -273,10 +267,17 @@ class CameraBase(object):
         return coor
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Compute the image flow data from sequence of camera poses and their depth information.')
+
+    parser.add_argument("--input", help = "The filename of the input json file.", default = INPUT_JSON)
+    parser.add_argument("--debug", help = "Debug information including 3D point clouds will be written addintionally.", action = "store_true", default = False)
+
+    args = parser.parse_args()
+
     # Read the JSON input file.
-    fpJSON = open(INPUT_JSON, "r")
+    fpJSON = open(args.input, "r")
     if ( fpJSON is None ):
-        print("%s could not be opened." % (INPUT_JSON))
+        print("%s could not be opened." % (args.input))
         # Handle the error.
 
     inputParams = json.load(fpJSON)
@@ -312,14 +313,21 @@ if __name__ == "__main__":
     depthDir      = dataDir + "/" + inputParams["depthDir"]
     depthTail     = inputParams["depthSuffix"] + inputParams["depthExt"]
     distanceRange = inputParams["distanceRange"]
+    flagDegree    = inputParams["flagDegree"]
+
+    estimatedLoops = estimate_loops( nPoses - inputParams["startingIdx"], idxStep )
+
+    count = 0
 
     for i in range( inputParams["startingIdx"] + idxStep,\
         nPoses, idxStep ):
 
-        print("i = %d" % (i))
+        show_delimiter( title = "%d / %d" % ( count + 1, estimatedLoops ) )
 
         poseID_0 = poseIDs[ i - idxStep ]
         poseID_1 = poseIDs[ i ]
+
+        print("poseID_0 = %s, poseID_1 = %s" % (poseID_0, poseID_1))
 
         outDir = outDirBase + "/" + poseID_0
 
@@ -352,34 +360,39 @@ if __name__ == "__main__":
 
         # Load the depth of the first image.
         depth_0 = np.load( depthDir + "/" + poseID_0 + depthTail )
-        np.savetxt( outDir + "/depth_0.dat", depth_0, fmt="%.2e")
+        if ( True == args.debug ):
+            np.savetxt( outDir + "/depth_0.dat", depth_0, fmt="%.2e")
 
         # Calculate the coordinates in the first camera's frame.
         X0 = cam_0.from_depth_to_x_y(depth_0)
-
-        output_to_ply(outDir + '/XInCam_0.ply', X0, cam_0.imageSize, distanceRange)
+        if ( True == args.debug ):
+            output_to_ply(outDir + '/XInCam_0.ply', X0, cam_0.imageSize, distanceRange)
 
         # The coordinates in the world frame.
         XWorld_0  = R0Inv.dot(X0 - t0)
-        output_to_ply(outDir + "/XInWorld_0.ply", XWorld_0, cam_1.imageSize, distanceRange)
+        if ( True == args.debug ):
+            output_to_ply(outDir + "/XInWorld_0.ply", XWorld_0, cam_1.imageSize, distanceRange)
 
         # Load the depth of the second image.
         depth_1 = np.load( depthDir + "/" + poseID_1 + depthTail )
-        np.savetxt( outDir + "/depth_1.dat", depth_1, fmt="%.2e")
+        if ( True == args.debug ):
+            np.savetxt( outDir + "/depth_1.dat", depth_1, fmt="%.2e")
 
         # Calculate the coordinates in the second camera's frame.
         X1 = cam_1.from_depth_to_x_y(depth_1)
-
-        output_to_ply(outDir + "/XInCam_1.ply", X1, cam_1.imageSize, distanceRange)
+        if ( True == args.debug ):
+            output_to_ply(outDir + "/XInCam_1.ply", X1, cam_1.imageSize, distanceRange)
 
         # The coordiantes in the world frame.
         XWorld_1 = R1Inv.dot( X1 - t1 )
-        output_to_ply(outDir + "/XInWorld_1.ply", XWorld_1, cam_1.imageSize, distanceRange)
+        if ( True == args.debug ):
+            output_to_ply(outDir + "/XInWorld_1.ply", XWorld_1, cam_1.imageSize, distanceRange)
 
         # ====================================
         # The coordinate in the seconde camera's frame.
         X_01 = R1.dot(XWorld_0) + t1
-        output_to_ply(outDir + '/X_01.ply', X_01, cam_0.imageSize, distanceRange)
+        if ( True == args.debug ):
+            output_to_ply(outDir + '/X_01.ply', X_01, cam_0.imageSize, distanceRange)
 
         # The image coordinates in the second camera.
         c = cam_0.from_camera_frame_to_image(X_01)
@@ -393,17 +406,27 @@ if __name__ == "__main__":
         # Get the du and dv.
         du, dv = du_dv(u, v, cam_0.imageSize)
 
-        # Save.
+        # Save du and dv.
         np.savetxt(outDir + "/du.dat", du.astype(np.int), fmt="%+3d")
         np.savetxt(outDir + "/dv.dat", dv.astype(np.int), fmt="%+3d")
 
-        a = np.arctan2( dv, du ) / np.pi * 180
+        # Calculate the angle and distance.
+        a = np.arctan2( dv, du )
+        if ( True == flagDegree ):
+            a = a / np.pi * 180
+            print("Convert angle from radian to degree as demanded by the input file.")
 
         d = np.sqrt( du * du + dv * dv )
 
+        # Save the angle and distance.
         np.savetxt(outDir + "/a.dat", a, fmt="%+.2e")
         np.savetxt(outDir + "/d.dat", d, fmt="%+.2e")
 
         # show(a, d, (cam_0.imageSize[0], cam_0.imageSize[1], 3))
 
-        print("Done with i = %d" % (i))
+        print("Done with i = %d" % ( i - idxStep ))
+
+        count += 1
+
+    show_delimiter("Summary.")
+    print("%d poses, starting at idx = %d, step = %d, %d steps in total.\n" % (nPoses, inputParams["startingIdx"], idxStep, count))
