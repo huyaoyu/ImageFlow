@@ -1,19 +1,20 @@
 {
-    "dataDir": "./data/test/blockworld_move_yaw_planner",
-    "startingIdx": 0,
-    "idxStep": 2,
+    "dataDir": "./data/20180803",
+    "startingIdx": 100,
+    "idxStep": 1,
+    "idxNumberRequest": 1,
     "poseFilename": "pose_name.json",
     "poseName": "pose_name",
     "poseData": "pose_wo_name.npy",
     "outDir": "ImageFlow",
-    "depthDir": "depth_plan",
+    "depthDir": "",
     "depthSuffix": "_depth",
     "depthExt": ".npy",
     "camera": {
-        "focal": 320,
-        "imageSize": [360, 640]
+        "focal": 256,
+        "imageSize": [384, 512]
     },
-    "imageMagnitudeFactor": 10.0,
+    "imageMagnitudeFactor": 1.0,
     "imageWaitTimeMS": 2000,
     "distanceRange": 50,
     "flagDegree": true

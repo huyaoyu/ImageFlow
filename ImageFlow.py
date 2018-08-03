@@ -304,6 +304,8 @@ if __name__ == "__main__":
     _, poseIDs = load_IDs_JSON(\
         dataDir + "/" + inputParams["poseFilename"], inputParams["poseName"])
     poseData   = np.load( dataDir + "/" + inputParams["poseData"] )
+    if ( True == args.debug ):
+        np.savetxt( dataDir + "/poseData.dat", poseData, fmt="%+.4e" )
 
     # print(poseData.shape)
     print("poseData and poseFilenames loaded.")
@@ -331,6 +333,7 @@ if __name__ == "__main__":
     estimatedLoops = estimate_loops( nPoses - inputParams["startingIdx"], idxStep )
 
     count = 0
+    idxNumberRequest = inputParams["idxNumberRequest"]
 
     for i in range( inputParams["startingIdx"] + idxStep,\
         nPoses, idxStep ):
@@ -449,7 +452,7 @@ if __name__ == "__main__":
 
         # Show and save the resulting HSV image.
         if ( 1 == estimatedLoops ):
-            show(a, d, outDir, mf, angleShift)
+            show(a, d, outDir, (int)(mf), angleShift)
         else:
             show(a, d, outDir, (int)(inputParams["imageWaitTimeMS"]), mf, angleShift)
 
@@ -457,8 +460,12 @@ if __name__ == "__main__":
 
         count += 1
 
+        if ( count >= idxNumberRequest ):
+            print("Loop number hits the request number. Stop here.")
+            break
+
     show_delimiter("Summary.")
-    print("%d poses, starting at idx = %d, step = %d, %d steps in total.\n" % (nPoses, inputParams["startingIdx"], idxStep, count))
+    print("%d poses, starting at idx = %d, step = %d, %d steps in total. idxNumberRequest = %d\n" % (nPoses, inputParams["startingIdx"], idxStep, count, idxNumberRequest))
 
     if ( args.mf >= 0 ):
         print( "Command line argument --mf %f overwrites the parameter \"imageMagnitudeFactor\" (%f) in the input JSON file.\n" % (mf, inputParams["imageMagnitudeFactor"]) )
