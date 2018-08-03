@@ -37,6 +37,9 @@ PLY_COLORS = [\
 
 PLY_COLOR_LEVELS = 20
 
+WORLD_ORIGIN  = np.zeros((3, 1))
+CAMERA_ORIGIN = np.zeros((3, 1))
+
 def show_delimiter(title = "", c = "=", n = 50, leading = "\n", ending = "\n"):
     d = [c for i in range(n/2)]
     s = "".join(d) + " " + title + " " + "".join(d)
@@ -68,15 +71,19 @@ def depth_to_color(depth, limit = None):
 
     return color
 
-def output_to_ply(fn, X, imageSize, rLimit):
+def output_to_ply(fn, X, imageSize, rLimit, origin):
     vertices = np.zeros(( imageSize[0], imageSize[1], 3 ), dtype = np.float)
     vertices[:, :, 0] = X[0, :].reshape(imageSize)
     vertices[:, :, 1] = X[1, :].reshape(imageSize)
     vertices[:, :, 2] = X[2, :].reshape(imageSize)
     
     vertices = vertices.reshape((-1, 3))
+    rv = copy.deepcopy(vertices)
+    rv[:, 0] = vertices[:, 0] - origin[0, 0]
+    rv[:, 1] = vertices[:, 1] - origin[1, 0]
+    rv[:, 2] = vertices[:, 2] - origin[2, 0]
 
-    r = LA.norm(vertices, axis=1).reshape((-1,1))
+    r = LA.norm(rv, axis=1).reshape((-1,1))
     mask = r < rLimit
     mask = mask.reshape(( mask.size ))
 
@@ -165,7 +172,7 @@ def get_pose_by_ID(ID, poseIDs, poseData):
     q = data[3:, 0].reshape((-1, 1))
     R = from_quaternion_to_rotation_matrix(q)
 
-    return LA.inv(R), -t, q
+    return R.transpose(), -R.transpose().dot(t), q
 
 def du_dv(nu, nv, imageSize):
     wIdx = np.linspace( 0, imageSize[1] - 1, imageSize[1] )
@@ -382,12 +389,12 @@ if __name__ == "__main__":
         # Calculate the coordinates in the first camera's frame.
         X0 = cam_0.from_depth_to_x_y(depth_0)
         if ( True == args.debug ):
-            output_to_ply(outDir + '/XInCam_0.ply', X0, cam_0.imageSize, distanceRange)
+            output_to_ply(outDir + '/XInCam_0.ply', X0, cam_0.imageSize, distanceRange, CAMERA_ORIGIN)
 
         # The coordinates in the world frame.
         XWorld_0  = R0Inv.dot(X0 - t0)
         if ( True == args.debug ):
-            output_to_ply(outDir + "/XInWorld_0.ply", XWorld_0, cam_1.imageSize, distanceRange)
+            output_to_ply(outDir + "/XInWorld_0.ply", XWorld_0, cam_1.imageSize, distanceRange, -R0Inv.dot(t0))
 
         # Load the depth of the second image.
         depth_1 = np.load( depthDir + "/" + poseID_1 + depthTail )
@@ -397,18 +404,18 @@ if __name__ == "__main__":
         # Calculate the coordinates in the second camera's frame.
         X1 = cam_1.from_depth_to_x_y(depth_1)
         if ( True == args.debug ):
-            output_to_ply(outDir + "/XInCam_1.ply", X1, cam_1.imageSize, distanceRange)
+            output_to_ply(outDir + "/XInCam_1.ply", X1, cam_1.imageSize, distanceRange, CAMERA_ORIGIN)
 
         # The coordiantes in the world frame.
         XWorld_1 = R1Inv.dot( X1 - t1 )
         if ( True == args.debug ):
-            output_to_ply(outDir + "/XInWorld_1.ply", XWorld_1, cam_1.imageSize, distanceRange)
+            output_to_ply(outDir + "/XInWorld_1.ply", XWorld_1, cam_1.imageSize, distanceRange, -R1Inv.dot(t1))
 
         # ====================================
         # The coordinate in the seconde camera's frame.
         X_01 = R1.dot(XWorld_0) + t1
         if ( True == args.debug ):
-            output_to_ply(outDir + '/X_01.ply', X_01, cam_0.imageSize, distanceRange)
+            output_to_ply(outDir + '/X_01.ply', X_01, cam_0.imageSize, distanceRange, CAMERA_ORIGIN)
 
         # The image coordinates in the second camera.
         c = cam_0.from_camera_frame_to_image(X_01)

@@ -16,6 +16,6 @@
     },
     "imageMagnitudeFactor": 1.0,
     "imageWaitTimeMS": 2000,
-    "distanceRange": 50,
+    "distanceRange": 10000,
     "flagDegree": true
 }
