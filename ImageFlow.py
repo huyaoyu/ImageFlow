@@ -175,22 +175,26 @@ def du_dv(nu, nv, imageSize):
 
     return nu - u, nv - v
 
-def show(ang, mag, outDir):
+def show(ang, mag, outDir = None, waitTime = None):
     """ang: degree"""
     # Use Hue, Saturation, Value colour model 
-    hsv = np.zeros(shape, dtype=np.uint8)
+    hsv = np.zeros( ( ang.shape[0], ang.shape[1], 3 ) , dtype=np.uint8)
     hsv[..., 1] = 255
 
     # mag, ang = cv2.cartToPolar(flow[..., 0], flow[..., 1]
 
     hsv[..., 0] = (ang + 180)/ 2
     hsv[..., 2] = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX)
-    rgb = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+    bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
 
-    np.savetxt(outDir + "/rgb.dat", rgb[:, :, 0], fmt="%3d")
+    if ( outDir is not None ):
+        cv2.imwrite(outDir + "/bgr.jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 100])
 
-    plt.imshow(rgb)
-    plt.show()
+    cv2.imshow("HSV2GBR", bgr)
+    if ( waitTime is None ):
+        cv2.waitKey()
+    else:
+        cv2.waitKey( waitTime )
 
 def estimate_loops(N, step):
     """
@@ -410,6 +414,11 @@ if __name__ == "__main__":
         np.savetxt(outDir + "/du.dat", du.astype(np.int), fmt="%+3d")
         np.savetxt(outDir + "/dv.dat", dv.astype(np.int), fmt="%+3d")
 
+        dudv = np.zeros( ( cam_0.imageSize[0], cam_0.imageSize[1], 2), dtype = np.float32 )
+        dudv[:, :, 0] = du
+        dudv[:, :, 1] = dv
+        np.save(outDir + "/dudv.npy", dudv)
+
         # Calculate the angle and distance.
         a = np.arctan2( dv, du )
         if ( True == flagDegree ):
@@ -422,7 +431,16 @@ if __name__ == "__main__":
         np.savetxt(outDir + "/a.dat", a, fmt="%+.2e")
         np.savetxt(outDir + "/d.dat", d, fmt="%+.2e")
 
-        # show(a, d, (cam_0.imageSize[0], cam_0.imageSize[1], 3))
+        angleAndDist = np.zeros( ( cam_0.imageSize[0], cam_0.imageSize[1], 2), dtype = np.float32 )
+        angleAndDist[:, :, 0] = a
+        angleAndDist[:, :, 1] = d
+        np.save(outDir + "/ad.npy", angleAndDist)
+
+        # Show and save the resulting HSV image.
+        if ( 1 == estimatedLoops ):
+            show(a, d, outDir)
+        else:
+            show(a, d, outDir, inputParams["imageWaitTimeMS"])
 
         print("Done with i = %d" % ( i - idxStep ))
 

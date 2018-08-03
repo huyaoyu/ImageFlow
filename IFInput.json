@@ -13,6 +13,7 @@
         "focal": 320,
         "imageSize": [360, 640]
     },
+    "imageWaitTimeMS": 2000,
     "distanceRange": 50,
     "flagDegree": true
 }
