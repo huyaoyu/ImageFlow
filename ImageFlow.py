@@ -1,3 +1,4 @@
+#!/usr/bin/python
 
 from __future__ import print_function
 
@@ -333,7 +334,7 @@ if __name__ == "__main__":
     idxStep       = inputParams["idxStep"]
     outDirBase    = dataDir + "/" + inputParams["outDir"]
     depthDir      = dataDir + "/" + inputParams["depthDir"]
-    imgDir        = dataDir + "/image"
+    imgDir        = dataDir + "/" + inputParams["imageDir"]
     depthTail     = inputParams["depthSuffix"] + inputParams["depthExt"]
     distanceRange = inputParams["distanceRange"]
     flagDegree    = inputParams["flagDegree"]
