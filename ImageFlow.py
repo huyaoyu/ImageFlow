@@ -382,6 +382,8 @@ if __name__ == "__main__":
         # Compute the rotation between the two camera poses.
         R = np.matmul( R1, R0Inv )
         print("R = \n{}".format(R))
+        # print("RInv = \n{}".format(LA.inv(R))) # This should be the transpose of R.
+        # print("Temp = {}".format( -LA.inv(R).dot(t1) + t0 ))
 
         # Load the depth of the first image.
         depth_0 = np.load( depthDir + "/" + poseID_0 + depthTail )
@@ -432,8 +434,8 @@ if __name__ == "__main__":
         du, dv = du_dv(u, v, cam_0.imageSize)
 
         # Save du and dv.
-        np.savetxt(outDir + "/du.dat", du.astype(np.int), fmt="%+3d")
-        np.savetxt(outDir + "/dv.dat", dv.astype(np.int), fmt="%+3d")
+        np.savetxt(outDir + "/du.dat", du.astype(np.int), fmt="%+4d")
+        np.savetxt(outDir + "/dv.dat", dv.astype(np.int), fmt="%+4d")
 
         dudv = np.zeros( ( cam_0.imageSize[0], cam_0.imageSize[1], 2), dtype = np.float32 )
         dudv[:, :, 0] = du
