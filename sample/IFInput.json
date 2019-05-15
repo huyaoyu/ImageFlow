@@ -1,0 +1,24 @@
+{
+    "dataDir": "./sample",
+    "startingIdx": 0,
+    "idxStep": 10,
+    "idxNumberRequest": 1000,
+    "poseFilename": "pose_name.json",
+    "poseName": "pose_name",
+    "poseData": "pose_wo_name.npy",
+    "outDir": "ImageFlow",
+    "imageDir": "image",
+    "imageSuffix": "_rgb",
+    "imageExt": ".png",
+    "depthDir": "depth_plan",
+    "depthSuffix": "_depth",
+    "depthExt": ".npy",
+    "camera": {
+        "focal": 256,
+        "imageSize": [384, 512]
+    },
+    "imageMagnitudeFactor": 1.0,
+    "imageWaitTimeMS": 2000,
+    "distanceRange": 10000,
+    "flagDegree": true
+}

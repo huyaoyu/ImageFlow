@@ -42,7 +42,7 @@ WORLD_ORIGIN  = np.zeros((3, 1))
 CAMERA_ORIGIN = np.zeros((3, 1))
 
 def show_delimiter(title = "", c = "=", n = 50, leading = "\n", ending = "\n"):
-    d = [c for i in range(n/2)]
+    d = [c for i in range( int(n/2) )]
     s = "".join(d) + " " + title + " " + "".join(d)
 
     print("%s%s%s" % (leading, s, ending))
@@ -73,6 +73,10 @@ def depth_to_color(depth, limit = None):
     return color
 
 def output_to_ply(fn, X, imageSize, rLimit, origin):
+    # Check the input X.
+    if ( X.max() <= X.min() ):
+        raise Exception("X.max() = %f, X.min() = %f." % ( X.max(), X.min() ) )
+    
     vertices = np.zeros(( imageSize[0], imageSize[1], 3 ), dtype = np.float)
     vertices[:, :, 0] = X[0, :].reshape(imageSize)
     vertices[:, :, 1] = X[1, :].reshape(imageSize)
@@ -87,14 +91,12 @@ def output_to_ply(fn, X, imageSize, rLimit, origin):
     r = LA.norm(rv, axis=1).reshape((-1,1))
     mask = r < rLimit
     mask = mask.reshape(( mask.size ))
-
+    # import ipdb; ipdb.set_trace()
     r = r[ mask ]
 
     cr, cg, cb = color_map(r, PLY_COLORS, PLY_COLOR_LEVELS)
 
     colors = np.zeros( (r.size, 3), dtype = np.uint8 )
-
-    # import ipdb; ipdb.set_trace()
 
     colors[:, 0] = cr.reshape( cr.size )
     colors[:, 1] = cg.reshape( cr.size )
@@ -335,6 +337,8 @@ if __name__ == "__main__":
     outDirBase    = dataDir + "/" + inputParams["outDir"]
     depthDir      = dataDir + "/" + inputParams["depthDir"]
     imgDir        = dataDir + "/" + inputParams["imageDir"]
+    imgSuffix     = inputParams["imageSuffix"]
+    imgExt        = inputParams["imageExt"]
     depthTail     = inputParams["depthSuffix"] + inputParams["depthExt"]
     distanceRange = inputParams["distanceRange"]
     flagDegree    = inputParams["flagDegree"]
@@ -393,12 +397,20 @@ if __name__ == "__main__":
         # Calculate the coordinates in the first camera's frame.
         X0 = cam_0.from_depth_to_x_y(depth_0)
         if ( True == args.debug ):
-            output_to_ply(outDir + '/XInCam_0.ply', X0, cam_0.imageSize, distanceRange, CAMERA_ORIGIN)
+            try:
+                output_to_ply(outDir + '/XInCam_0.ply', X0, cam_0.imageSize, distanceRange, CAMERA_ORIGIN)
+            except Exception as e:
+                print("Cannot write PLY file for X0. Exception: ")
+                print(e)
 
         # The coordinates in the world frame.
         XWorld_0  = R0Inv.dot(X0 - t0)
         if ( True == args.debug ):
-            output_to_ply(outDir + "/XInWorld_0.ply", XWorld_0, cam_1.imageSize, distanceRange, -R0Inv.dot(t0))
+            try:
+                output_to_ply(outDir + "/XInWorld_0.ply", XWorld_0, cam_1.imageSize, distanceRange, -R0Inv.dot(t0))
+            except Exception as e:
+                print("Cannot write PLY file for XWorld_0. Exception: ")
+                print(e)
 
         # Load the depth of the second image.
         depth_1 = np.load( depthDir + "/" + poseID_1 + depthTail )
@@ -408,18 +420,30 @@ if __name__ == "__main__":
         # Calculate the coordinates in the second camera's frame.
         X1 = cam_1.from_depth_to_x_y(depth_1)
         if ( True == args.debug ):
-            output_to_ply(outDir + "/XInCam_1.ply", X1, cam_1.imageSize, distanceRange, CAMERA_ORIGIN)
+            try:
+                output_to_ply(outDir + "/XInCam_1.ply", X1, cam_1.imageSize, distanceRange, CAMERA_ORIGIN)
+            except Exception as e:
+                print("Cannot write PLY file for X1. Exception: ")
+                print(e)
 
         # The coordiantes in the world frame.
         XWorld_1 = R1Inv.dot( X1 - t1 )
         if ( True == args.debug ):
-            output_to_ply(outDir + "/XInWorld_1.ply", XWorld_1, cam_1.imageSize, distanceRange, -R1Inv.dot(t1))
+            try:
+                output_to_ply(outDir + "/XInWorld_1.ply", XWorld_1, cam_1.imageSize, distanceRange, -R1Inv.dot(t1))
+            except Exception as e:
+                print("Cannot write PLY file for XWorld_1. Exception: ")
+                print(e)
 
         # ====================================
         # The coordinate in the seconde camera's frame.
         X_01 = R1.dot(XWorld_0) + t1
         if ( True == args.debug ):
-            output_to_ply(outDir + '/X_01.ply', X_01, cam_0.imageSize, distanceRange, CAMERA_ORIGIN)
+            try:
+                output_to_ply(outDir + '/X_01.ply', X_01, cam_0.imageSize, distanceRange, CAMERA_ORIGIN)
+            except Exception as e:
+                print("Cannot write PLY file for X_01. Exception: ")
+                print(e)
 
         # The image coordinates in the second camera.
         c = cam_0.from_camera_frame_to_image(X_01)
@@ -463,7 +487,9 @@ if __name__ == "__main__":
 
         # warp the image to see the result -- amigo
         # import ipdb; ipdb.set_trace()
-        cam0_img = cv2.imread(imgDir + "/" + poseID_0 + '_rgb.png')
+        cam0ImgFn = "%s/%s%s%s" % ( imgDir, poseID_0, imgSuffix, imgExt )
+        print("Warp %s." % (cam0ImgFn))
+        cam0_img = cv2.imread( cam0ImgFn, cv2.IMREAD_UNCHANGED )
         warp_img = np.zeros_like(cam0_img)
         for h in range(cam0_img.shape[0]):
             for w in range(cam0_img.shape[1]):
@@ -471,7 +497,8 @@ if __name__ == "__main__":
                 if u_w < cam0_img.shape[1] and v_w < cam0_img.shape[0] and u_w >= 0 and v_w >= 0:
                     warp_img[v_w, u_w, :] = cam0_img[h, w, :]
         
-        cv2.imwrite(imgDir + "/" + poseID_0 + '_warp.png', warp_img)
+        cam0WrpFn = "%s/%s%s%s%s" % ( imgDir, poseID_0, imgSuffix, "_warp", imgExt )
+        cv2.imwrite(cam0WrpFn, warp_img)
         cv2.imshow('img', warp_img)
         # The waitKey() will be executed in show() later.
         # cv2.waitKey(0)

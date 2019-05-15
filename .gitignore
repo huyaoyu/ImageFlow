@@ -3,3 +3,6 @@
 data/
 *.code-workspace
 sample/ImageFlow
+*.png
+*.jpg
+*.ipynb

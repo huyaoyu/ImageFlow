@@ -32,6 +32,8 @@ Inputs are fed into ImageFlow through a JSON file. The user could find a sample 
 * __poseData__: A string represents the filename of File C.
 * __outDir__: A string shows the output directory.
 * __imageDir__: A string shows the image directory, Folder A.
+* __imageSuffix__: A string represents the filename suffix of the input image file.
+* __imageExt__: A string represents the extension part of the filename of an image file, including the period in front of the extension.
 * __depthDir__: A string shows the directory which contains all the depth files, Folder B.
 * __depthSuffix__: A string represents a suffix in the filenames of the depth files. We were generating these depth files and naming them after each image. So there is a uniform suffix for each depth file.
 * __depthExt__: A string represents the extension part of the filename of a depth file, including the period in front of the extension.
