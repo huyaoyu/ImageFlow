@@ -267,7 +267,7 @@ class CameraBase(object):
 
         u = u.astype(np.float)
         v = v.astype(np.float)
-
+        
         x = ( u - self.pu ) * depth / self.focal
         y = ( v - self.pv ) * depth / self.focal
 
