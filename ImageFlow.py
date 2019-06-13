@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import numpy.linalg as LA
 import os
+from threading import Thread
 
 from ColorMapping import color_map
 
@@ -336,8 +337,8 @@ def create_warp_masks(imageSize, x01, x1, u, v):
     # Loop for every pixel index.
     for i in range( h*w ):
         # Get the u and v coordinate of the pixel in the image plane of the second camera.
-        iu = int( u[i] )
-        iv = int( v[i] )
+        iu = int( round( u[i] ) )
+        iv = int( round( v[i] ) )
 
         # Get the u and v coordinate of the pixel in the image plane of the original camera.
         iy = i // w
@@ -345,6 +346,14 @@ def create_warp_masks(imageSize, x01, x1, u, v):
 
         # Check if the new index is out of boundary?
         if ( iu < 0 or iv < 0 or iu >= w or iv >= h ):
+            # Update the FOV mask.
+            maskFOV[iy, ix] = 1
+
+            # Stop the current loop.
+            continue
+        
+        # Check if the current point is on the opposite side of the image plane of the second camera.
+        if ( x01[2, i] <= 0 ):
             # Update the FOV mask.
             maskFOV[iy, ix] = 1
 
@@ -384,7 +393,8 @@ def create_warp_masks(imageSize, x01, x1, u, v):
         if ( d0 <= d1 ):
             # Current point is nearer to the camera or equals the distance of the corresponding pixel in the second image.
             pass
-        elif ( ( d0 > 1000 and d1 > 1000 ) or d0 - d1 < 0.05 * d0 ):
+        # elif ( ( d0 > 1000 and d1 > 1000 ) or d0 - d1 < 0.05 * d0 ):
+        elif ( ( d0 > 1000 and d1 > 1000 ) ):
             pass
         else:
             # Current point is occluded by the corresponding pixel in the second image.
@@ -426,8 +436,8 @@ def evaluate_warp_error( img0, img1, x01, x1, u, v ):
     u1 = u.reshape((-1,))[idx0]
     v1 = v.reshape((-1,))[idx0]
 
-    u1 = u1.astype(np.int32)
-    v1 = v1.astype(np.int32)
+    u1 = np.around(u1).astype(np.int32)
+    v1 = np.around(v1).astype(np.int32)
 
     # Convert u1 and v1 into linear index.
     idx1 = v1 * img1.shape[1] + u1
@@ -549,7 +559,7 @@ def make_angle_distance(cam, a, d):
 
     return angleAndDist
 
-def print_over_warp_error_list(overWarpErrList, t):
+def print_over_warp_error_list(overWarpErrList, t, fn):
     # { "idx": i, "poseID_0": poseID_0, "poseID_1": poseID_1, "meanWarpError": meanWarpError }
 
     if ( 0 != len( overWarpErrList ) ):
@@ -559,8 +569,17 @@ def print_over_warp_error_list(overWarpErrList, t):
         print( "No warp error over the threshold (%f). " % (t) )
         return
     
+    fp = open(fn, "w")
+    fp.write("idx, poseID_0, poseID_1, meanWarpError\n")
+
     for entry in overWarpErrList:
-        print( "%d, %s, %s, %f. " % ( entry["idx"], entry["poseID_0"], entry["poseID_1"], entry["meanWarpError"] ) )
+        s = "%d, %s, %s, %f" % ( entry["idx"], entry["poseID_0"], entry["poseID_1"], entry["meanWarpError"] )
+        print( s )
+
+        s += "\n"
+        fp.write(s)
+    
+    fp.close()
 
 def print_max_warp_error(entry):
     if ( entry["idx"] != -1 ):
@@ -580,8 +599,8 @@ def process_single_thread(name, inputParams, args, poseIDs, poseData, indexList,
 
     # Camera.
     cam_0 = CameraBase(inputParams["camera"]["focal"], inputParams["camera"]["imageSize"])
-    print(cam_0.imageSize)
-    print(cam_0.cameraMatrix)
+    # print(cam_0.imageSize)
+    # print(cam_0.cameraMatrix)
 
     # We are assuming that the cameras at the two poses are the same camera.
     cam_1 = cam_0
@@ -608,7 +627,7 @@ def process_single_thread(name, inputParams, args, poseIDs, poseData, indexList,
 
     for i in range( startII+1, endII+1 ):
         # Show the delimiter.
-        show_delimiter( title = "%s: %d / %d" % ( name, count + 1, estimatedLoops ) )
+        show_delimiter( title = "%s: %d / %d" % ( name, count + 1, estimatedLoops ), leading="", ending="" )
 
         idxPose0 = indexList[i - 1]
         idxPose1 = indexList[i]
@@ -616,7 +635,7 @@ def process_single_thread(name, inputParams, args, poseIDs, poseData, indexList,
         poseID_0 = poseIDs[ idxPose0 ]
         poseID_1 = poseIDs[ idxPose1 ]
 
-        print("poseID_0 = %s, poseID_1 = %s" % (poseID_0, poseID_1))
+        # print("poseID_0 = %s, poseID_1 = %s" % (poseID_0, poseID_1))
 
         # Prepare output directory.
         outDir = outDirBase + "/" + poseID_0
@@ -720,13 +739,13 @@ def process_single_thread(name, inputParams, args, poseIDs, poseData, indexList,
         # Get new u anv v
         u = c[0, :].reshape(cam_0.imageSize)
         v = c[1, :].reshape(cam_0.imageSize)
-        np.savetxt(outDir + "/u.dat", u, fmt="%4d")
-        np.savetxt(outDir + "/v.dat", v, fmt="%4d")
+        np.savetxt(outDir + "/u.dat", u, fmt="%+.2e")
+        np.savetxt(outDir + "/v.dat", v, fmt="%+.2e")
 
         # Get the du and dv.
         du, dv = du_dv(u, v, cam_0.imageSize)
-        np.savetxt(outDir + "/du.dat", du.astype(np.int), fmt="%+4d")
-        np.savetxt(outDir + "/dv.dat", dv.astype(np.int), fmt="%+4d")
+        np.savetxt(outDir + "/du.dat", du, fmt="%+.2e")
+        np.savetxt(outDir + "/dv.dat", dv, fmt="%+.2e")
 
         dudv = np.zeros( ( cam_0.imageSize[0], cam_0.imageSize[1], 2), dtype = np.float32 )
         dudv[:, :, 0] = du
@@ -754,9 +773,10 @@ def process_single_thread(name, inputParams, args, poseIDs, poseData, indexList,
             warpErrMaxEntry["poseID_1"] = poseID_1
             warpErrMaxEntry["warpErr"]  = meanWarpError
 
-        cv2.imshow('img', warppedImg)
-        # The waitKey() will be executed in show() later.
-        # cv2.waitKey(0)
+        if ( True == flagShowFigure ):
+            cv2.imshow('img', warppedImg)
+            # The waitKey() will be executed in show() later.
+            # cv2.waitKey(0)
 
         # Show and save the resulting HSV image.
         if ( 1 == estimatedLoops ):
@@ -782,6 +802,34 @@ def process_single_thread(name, inputParams, args, poseIDs, poseData, indexList,
 
     return overWarpErrThresList, warpErrMaxEntry
 
+class ImageFlowThread(Thread):
+    def __init__(self, name, inputParams, args, poseIDs, poseData, indexList, startII, endII, flagShowFigure=False):
+        super(ImageFlowThread, self).__init__()
+
+        self.setName( name )
+
+        self.name           = name
+        self.inputParams    = inputParams
+        self.args           = args
+        self.poseIDs        = poseIDs
+        self.poseData       = poseData
+        self.indexList      = indexList
+        self.startII        = startII
+        self.endII          = endII
+        self.flagShowFigure = flagShowFigure
+
+        self.overWarpErrThresList = None
+        self.warpErrMaxEntry      = None
+
+    def run(self):
+        self.overWarpErrThresList, self.warpErrMaxEntry = \
+            process_single_thread( \
+                self.name, 
+                self.inputParams, self.args, 
+                self.poseIDs, self.poseData, 
+                self.indexList, self.startII, self.endII, 
+                flagShowFigure=self.flagShowFigure )
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Compute the image flow data from sequence of camera poses and their depth information.')
 
@@ -790,6 +838,8 @@ if __name__ == "__main__":
         help = "The iamge magnitude factor. If not specified, the value in the input JSON file will be used. Overwrite the value in the input JSON file is specifiec here.",\
         default = -1.0, type = float)
     parser.add_argument("--debug", help = "Debug information including 3D point clouds will be written addintionally.", action = "store_true", default = False)
+    parser.add_argument("--np", type=int, default=1, \
+        help="Number of threads.")
 
     args = parser.parse_args()
 
@@ -817,14 +867,53 @@ if __name__ == "__main__":
 
     startII, endII = 0, len( idxList ) - 1
 
-    # Process.
-    overWarpErrThresList, warpErrMaxEntry = \
-        process_single_thread("Single", inputParams, args, poseIDs, poseData, idxList, startII, endII, flagShowFigure=True)
+    nThreads = args.np
+    iiStep   = int( ( endII - startII ) / nThreads ) + 1
+
+    tList = []
+
+    for i in range(nThreads):
+        startII_t = i * iiStep
+        endII_t   = startII_t + iiStep
+
+        if ( endII_t > endII ):
+            endII_t = endII
+        
+        tList.append( ImageFlowThread( "T%02d" % (i), inputParams, args, poseIDs, poseData, idxList, int(startII_t), int(endII_t), False) )
+
+        if ( endII_t == endII ):
+            break
+
+    print( "Starting %d theads. " % ( len(tList) ) )
+
+    # Start the threads.
+    for t in tList:
+        t.start()
+
+    # Join the threads.
+    for t in tList:
+        t.join()
+
+    overWarpErrThresList = []
+    warpErrMaxEntry      = { "idx": -1, "poseID_0": "N/A", "poseID_1": "N/A", "warpErr": 0.0 }
+
+    # Gather results.
+    for t in tList:
+        overWarpErrThresList = overWarpErrThresList + t.overWarpErrThresList
+
+        if ( t.warpErrMaxEntry["warpErr"] > warpErrMaxEntry["warpErr"] ):
+            warpErrMaxEntry = t.warpErrMaxEntry
+
+    # # Process.
+    # overWarpErrThresList, warpErrMaxEntry = \
+    #     process_single_thread("Single", inputParams, args, poseIDs, poseData, idxList, startII, endII, flagShowFigure=False)
 
     show_delimiter("Summary.")
     print("%d poses, starting at idx = %d, step = %d, %d steps in total. idxNumberRequest = %d\n" % (nPoses, inputParams["startingIdx"], idxStep, len( idxList )-1, idxNumberRequest))
 
-    print_over_warp_error_list( overWarpErrThresList, inputParams["warpErrorThreshold"] )
+    print_over_warp_error_list( \
+        overWarpErrThresList, inputParams["warpErrorThreshold"], 
+        inputParams["dataDir"] + "/" + inputParams["outDir"] + "/overWarpErrThresList.csv" )
 
     print_max_warp_error( warpErrMaxEntry )
 
