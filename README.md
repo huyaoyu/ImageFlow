@@ -42,6 +42,7 @@ Inputs are fed into ImageFlow through a JSON file. The user could find a sample 
 * __iamgeWaitTimeMS__: An integer specifies the amount of time that the program waits while it is showing the resultant optical flow image on the screen. The unit is millisecond.
 * __distanceRange__: An integer represents a threshold distance from the camera. This value is used when the user wants ImageFlow to generate 3D point clouds for detailed inspection. The point clouds will be generated in the PLY format, which could be imported by software like the MeshLab. Point clouds are only generated if the user specifies --debug on the command line.
 * __flagDegree__: True or False. The pixel movement will be computed as moving direction and magnitude. For the direction, the user could choose use degree as the unit for the saved result and the optical flow image. Or the user could choose radian as the unit. Specify True for degree unit.
+* __warpErrorThreshold__: The Threshold for evaluating the warp error. This is the RGB differences between the pixels of the second image and the warped first image. The difference is calculated in a sense of average over all valid warped pixels. A difference higher than this threshold is considered as 'over threshold' and will be reported at the end of execution.
 
 ## Image name file (File B) ##
 
@@ -68,6 +69,7 @@ The user could invoke ImageFlow.py and specify some command line arguments in th
 * __--input \<input_filename\>__: The filename of File A, with its full path or relative path. If this argument is not specified in the command line, a default input file with a filename of "IFInput.json" will be used.
 * __--mf \<magnitude_factor\>__: The magnification factor at runtime the user specified to overwrite "__imageMagnitudeFactor__" in File A.
 * __--debug__: Use this argument to make ImageFlow to output all debugging data into "__outDir__" with the 3D point clouds included.
+* __--np__: Number of threads deployed to carry out the whole process.
 
 ##  Outputs ##
 
@@ -87,7 +89,7 @@ After a normal operation of ImageFlow without the --debug command line argument,
 * __dudy.dat__: Combines the data in __du.dat__ and __dv.dat__ into a 2-channel matrix.
 * __bgr.jpg__: A color image as the optical flow image.
 
-The warped images are written back to \<dataDir\> \ \<imageDir\> for easy comparision with the original input images.
+The warped images are written back to \<dataDir\> \ \<imageDir\> for easy comparision with the original input images. Along with the warped images, there are addtional files containing the warp error evaluation. Since these output files go to the image directory, this may lead to problem if the user wants to run ImageFlow.py multiple times with the same input images. Please use `RemoveOutputs.py` to delete all results from the input image directory. Refer to the code or issue `python RemoveOutputs.py --help` for usage of the script.
 
 Some 3D point clouds will be written if --debug command line argument is specified. These point clouds are used for debugging purpose, however, the user a welcome to use them anyway. These files are defined as follows:
 
