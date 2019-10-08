@@ -307,13 +307,15 @@ def get_distance_from_coordinate_table(tab, idx):
 
     return math.sqrt( x**2 + y**2 + z**2 )
 
-def create_warp_masks(imageSize, x01, x1, u, v):
+def create_warp_masks(imageSize, x01, x1, u, v, p=0.01, D=1000):
     """
     imageSize: height x width.
     x01: The 3D coordinates of the pixels in the first image observed in the frame of the second camera. 3-row 2D array.
     x1: The 3D coordinates of the pixels in the second image observed in the frame of the second camera. 3-row 2D array.
     u: The u coordinates of the pixel in the second image plane. 1D array.
     v: The v coordinates of the pixel in the second image plane. 1D array.
+    p: A coefficient controls the sensitivity of 0-1 occlustion. Unit percentage.
+    D: Points that fall beyond this distance will not be checked for occlusion. Unit m.
     """
     # import ipdb;ipdb.set_trace()
     # Check dimensions.
@@ -390,11 +392,10 @@ def create_warp_masks(imageSize, x01, x1, u, v):
         # Get the depth at x=iu, y=iv in the second image observed in the second camera.
         d1 = get_distance_from_coordinate_table(x1, iv*w + iu)
 
-        if ( d0 <= d1 ):
-            # Current point is nearer to the camera or equals the distance of the corresponding pixel in the second image.
+        if ( d0 > D and d1 > D ):
             pass
-        # elif ( ( d0 > 1000 and d1 > 1000 ) or d0 - d1 < 0.05 * d0 ):
-        elif ( ( d0 > 1000 and d1 > 1000 ) ):
+        elif ( d0 <= d1 or d0 - d1 < p*d1 ):
+            # Current point is nearer to the camera or equals the distance of the corresponding pixel in the second image.
             pass
         else:
             # Current point is occluded by the corresponding pixel in the second image.
@@ -722,7 +723,7 @@ def process_single_thread(name, inputParams, args, poseIDs, poseData, indexList,
                 print(e)
 
         # ====================================
-        # The coordinate of the pixels of the first camera projected in the seconde camera's frame (NED).
+        # The coordinate of the pixels of the first camera projected in the second camera's frame (NED).
         X_01 = R1.dot(XWorld_0) + t1
 
         if ( True == args.debug ):
