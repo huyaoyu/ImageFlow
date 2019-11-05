@@ -325,9 +325,10 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.01, D=1000):
     assert( x01.shape[0] == 3 )
 
     # Allocate memory.
-    occupancyMap  = np.zeros( imageSize, dtype=np.int32 ) - 1
-    maskOcclusion = np.zeros( imageSize, dtype=np.uint8 )
-    maskFOV       = np.zeros( imageSize, dtype=np.uint8 )
+    occupancyMap00 = np.zeros( imageSize, dtype=np.int32 ) - 1
+    occupancyMap01 = np.zeros( imageSize, dtype=np.int32 ) - 1
+    maskOcclusion  = np.zeros( imageSize, dtype=np.uint8 )
+    maskFOV        = np.zeros( imageSize, dtype=np.uint8 )
 
     # Reshape input arguments.
     u = u.reshape((-1,))
@@ -366,21 +367,21 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.01, D=1000):
         d0 = get_distance_from_coordinate_table(x01, i)
 
         # Check if the new index is occupied.
-        if ( -1 != occupancyMap[iv, iu] ):
+        if ( -1 != occupancyMap00[iv, iu] ):
             # This pixel is occupied.
 
             # Get the index registered in the occupancy map.
-            opIndex = occupancyMap[iv, iu]
+            opIndex = occupancyMap00[iv, iu]
 
             # Get the depth at the registered index.
             dr = get_distance_from_coordinate_table(x01, opIndex)
 
             if ( d0 < dr ):
-                # Current point nearer to the camera.
+                # Current point is nearer to the camera.
                 # Update the occlusion mask.
                 maskOcclusion[ opIndex // w, opIndex % w ] = 1
             elif ( d0 > dr ):
-                # Current point farther.
+                # Current point is farther.
                 # Update the occlusion mask.
                 maskOcclusion[ iy, ix ] = 1
 
@@ -389,6 +390,9 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.01, D=1000):
             else:
                 raise Exception("%d pixel has same distance with %d pixel." % ( i, opIndex ))
         
+        # Update the occupancy map.
+        occupancyMap00[ iv, iu ] = i
+
         # Get the depth at x=iu, y=iv in the second image observed in the second camera.
         d1 = get_distance_from_coordinate_table(x1, iv*w + iu)
 
@@ -402,37 +406,21 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.01, D=1000):
             # Update the occlusion mask.
             maskOcclusion[ iy, ix ] = 2
 
-            if ( -1 != occupancyMap[iv, iu] ):
+            if ( -1 != occupancyMap01[iv, iu] ):
                 raise Exception( "Current pixel %d, wins pre-registered %d but occlued by second image at x=%d, y=%d with d0=%f, dr=%f, d1=%f." \
                     % ( i, opIndex, iu, iv, d0, dr, d1 ) )
 
             continue
 
         # Update the occupancy map.
-        occupancyMap[ iv, iu ] = i
+        occupancyMap01[ iv, iu ] = i
         
-    return maskOcclusion, maskFOV, occupancyMap
+    return maskOcclusion, maskFOV, occupancyMap00, occupancyMap01
 
-def evaluate_warp_error( img0, img1, x01, x1, u, v ):
-    """
-    x01: The 3D coordinates of the pixels in the first image observed in the frame of the second camera. 3-row 2D array.
-    x1: The 3D coordinates of the pixels in the second image observed in the frame of the second camera. 3-row 2D array.
-    u: The u coordinates of the pixel in the second image plane. 1D array.
-    v: The v coordinates of the pixel in the second image plane. 1D array.
-    """
-
+def warp_error_by_index( img0, img1, u, v, idx0 ):
     h = img0.shape[0]
     w = img0.shape[1]
-
-    # Get the masks.
-    maskOcclusion, maskFOV, occupancyMap = create_warp_masks( img0.shape[:2], x01, x1, u, v )
-
-    # Make a mask for the occupancyMap
-    mask = occupancyMap != -1
-
-    # All indices need to be evaluated in img0.
-    idx0 = occupancyMap[mask].astype(np.int32)
-
+    
     # All u and v need to be evaluated in img1.
     u1 = u.reshape((-1,))[idx0]
     v1 = v.reshape((-1,))[idx0]
@@ -458,7 +446,38 @@ def evaluate_warp_error( img0, img1, x01, x1, u, v ):
     dImg0[idx0] = diff
     dImg1[idx1] = diff
 
-    return dImg0.reshape( (h, w) ), dImg1.reshape( (h, w) ), occupancyMap, mask
+    return dImg0.reshape( (h, w) ), dImg1.reshape( (h, w) )
+
+def evaluate_warp_error( img0, img1, x01, x1, u, v ):
+    """
+    x01: The 3D coordinates of the pixels in the first image observed in the frame of the second camera. 3-row 2D array.
+    x1: The 3D coordinates of the pixels in the second image observed in the frame of the second camera. 3-row 2D array.
+    u: The u coordinates of the pixel in the second image plane. 1D array.
+    v: The v coordinates of the pixel in the second image plane. 1D array.
+    """
+
+    h = img0.shape[0]
+    w = img0.shape[1]
+
+    # Get the masks.
+    maskOcclusion, maskFOV, occupancyMap00, occupancyMap01 = create_warp_masks( img0.shape[:2], x01, x1, u, v )
+
+    # Make a mask for the occupancyMap00
+    mask00 = occupancyMap00 != -1 
+
+    # All indices need to be evaluated in img0.
+    idx0_00 = occupancyMap00[mask00].astype(np.int32)
+
+    # Warp error by index.
+    dImg0_00, dImg1_00 = warp_error_by_index(img0, img1, u, v, idx0_00)
+
+    # 01.
+    mask01  = occupancyMap01 != -1
+    idx0_01 = occupancyMap01[mask01].astype(np.int32)
+    dImg0_01, dImg1_01 = warp_error_by_index(img0, img1, u, v, idx0_01)
+
+    return dImg0_00, dImg1_00, occupancyMap00, mask00, \
+           dImg0_01, dImg1_01, occupancyMap01, mask01
 
 def warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v):
     cam0ImgFn = "%s/%s%s%s" % ( imgDir, poseID_0, imgSuffix, imgExt )
@@ -472,14 +491,18 @@ def warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v):
     # Evaluate warp error.
     cam1_img = cv2.imread( cam1ImgFn, cv2.IMREAD_UNCHANGED )
     
-    dImg0, dImg1, occupancyMap, occupancyMask = evaluate_warp_error( cam0_img, cam1_img, X_01C, X1C, u, v )
-    save_float_image( warpErrImgFn, dImg1 )
+    dImg0_00, dImg1_00, occupancyMap_00, occupancyMask_00, \
+    dImg0_01, dImg1_01, occupancyMap_01, occupancyMask_01 \
+         = evaluate_warp_error( cam0_img, cam1_img, X_01C, X1C, u, v )
+
+    save_float_image( warpErrImgFn, dImg1_00 )
 
     # The mean warp error over the valid pixels in the seconde image.
-    meanError = dImg1[occupancyMask].mean()
+    meanError_00 = dImg1_00[occupancyMask_00].mean()
+    meanError_01 = dImg1_01[occupancyMask_01].mean()
 
     np.savetxt( warpErrStaFn, \
-        np.array([ dImg1[occupancyMask].min(), dImg1.max(), meanError ]).reshape((-1, 1)) )
+        np.array([ dImg1_00[occupancyMask_00].min(), dImg1_00.max(), meanError_00, dImg1_01[occupancyMask_01].min(), dImg1_01.max(), meanError_01 ]).reshape((-1, 1)) )
 
     warppedImg = np.zeros_like(cam0_img)
     
@@ -489,9 +512,9 @@ def warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v):
     #         if u_w < cam0_img.shape[1] and v_w < cam0_img.shape[0] and u_w >= 0 and v_w >= 0:
     #             warppedImg[v_w, u_w, :] = cam0_img[h, w, :]
     
-    # validWarpMask = occupancyMap != -1
-    validWarpMask = occupancyMask
-    validWarpIdx  = occupancyMap[validWarpMask]
+    # validWarpMask = occupancyMap_00 != -1
+    validWarpMask = occupancyMask_00
+    validWarpIdx  = occupancyMap_00[validWarpMask]
 
     cam0ImgCpy = copy.deepcopy(cam0_img).reshape( (-1, cam0_img.shape[2]) )
     warppedImg = warppedImg.reshape( (-1, cam0_img.shape[2]) )
@@ -502,7 +525,7 @@ def warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v):
     cam0WrpFn = "%s/%s%s%s%s" % ( imgDir, poseID_0, imgSuffix, "_warp", imgExt )
     cv2.imwrite(cam0WrpFn, warppedImg)
 
-    return warppedImg, meanError
+    return warppedImg, meanError_00, meanError_01
 
 def read_input_parameters_from_json(fn):
     fpJSON = open(fn, "r")
@@ -571,10 +594,10 @@ def print_over_warp_error_list(overWarpErrList, t, fn):
         return
     
     fp = open(fn, "w")
-    fp.write("idx, poseID_0, poseID_1, meanWarpError\n")
+    fp.write("idx, poseID_0, poseID_1, meanWarpError, meanWarpError_01\n")
 
     for entry in overWarpErrList:
-        s = "%d, %s, %s, %f" % ( entry["idx"], entry["poseID_0"], entry["poseID_1"], entry["meanWarpError"] )
+        s = "%d, %s, %s, %f, %f" % ( entry["idx"], entry["poseID_0"], entry["poseID_1"], entry["meanWarpError"], entry["meanWarpError_01"] )
         print( s )
 
         s += "\n"
@@ -585,11 +608,11 @@ def print_over_warp_error_list(overWarpErrList, t, fn):
 def print_max_warp_error(entry):
     if ( entry["idx"] != -1 ):
         print( "Max mean warp error: " )
-        print( "idx: %d, poseIDs: %s - %s, mean error: %f. " % \
-            ( entry["idx"], entry["poseID_0"], entry["poseID_1"], entry["warpErr"] ) )
+        print( "idx: %d, poseIDs: %s - %s, mean error: %f, mean error 01: %f. " % \
+            ( entry["idx"], entry["poseID_0"], entry["poseID_1"], entry["warpErr"], entry["warpErr_01"] ) )
     else:
         raise Exception( "Wrong max warp error entry: idx: %d, poseIDs: %s - %s, mean error: %f. " % \
-            ( entry["idx"], entry["poseID_0"], entry["poseID_1"], entry["warpErr"] ) )
+            ( entry["idx"], entry["poseID_0"], entry["poseID_1"], entry["warpErr"], entry["warpErr_01"] ) )
 
 def process_single_thread(name, inputParams, args, poseIDs, poseData, indexList, startII, endII, flagShowFigure=False):
     # Data directory.
@@ -624,7 +647,7 @@ def process_single_thread(name, inputParams, args, poseIDs, poseData, indexList,
     count = 0
 
     overWarpErrThresList = []
-    warpErrMaxEntry = { "idx": -1, "poseID_0": "N/A", "poseID_1": "N/A", "warpErr": 0.0 }
+    warpErrMaxEntry = { "idx": -1, "poseID_0": "N/A", "poseID_1": "N/A", "warpErr": 0.0, "warpErr_01": 0.0 }
 
     for i in range( startII+1, endII+1 ):
         # Show the delimiter.
@@ -762,17 +785,18 @@ def process_single_thread(name, inputParams, args, poseIDs, poseData, indexList,
         np.save(outDir + "/ad.npy", angleAndDist)
 
         # warp the image to see the result
-        warppedImg, meanWarpError = warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v)
+        warppedImg, meanWarpError, meanWarpError_01 = warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v)
 
         if ( meanWarpError > warpErrThres ):
             # print("meanWarpError (%f) > warpErrThres (%f). " % ( meanWarpError, warpErrThres ))
-            overWarpErrThresList.append( { "idx": i, "poseID_0": poseID_0, "poseID_1": poseID_1, "meanWarpError": meanWarpError } )
+            overWarpErrThresList.append( { "idx": i, "poseID_0": poseID_0, "poseID_1": poseID_1, "meanWarpError": meanWarpError, "meanWarpError_01": meanWarpError_01 } )
 
         if ( meanWarpError > warpErrMaxEntry["warpErr"] ):
             warpErrMaxEntry["idx"] = i
-            warpErrMaxEntry["poseID_0"] = poseID_0
-            warpErrMaxEntry["poseID_1"] = poseID_1
-            warpErrMaxEntry["warpErr"]  = meanWarpError
+            warpErrMaxEntry["poseID_0"]   = poseID_0
+            warpErrMaxEntry["poseID_1"]   = poseID_1
+            warpErrMaxEntry["warpErr"]    = meanWarpError
+            warpErrMaxEntry["warpErr_01"] = meanWarpError_01
 
         if ( True == flagShowFigure ):
             cv2.imshow('img', warppedImg)
@@ -896,7 +920,7 @@ if __name__ == "__main__":
         t.join()
 
     overWarpErrThresList = []
-    warpErrMaxEntry      = { "idx": -1, "poseID_0": "N/A", "poseID_1": "N/A", "warpErr": 0.0 }
+    warpErrMaxEntry      = { "idx": -1, "poseID_0": "N/A", "poseID_1": "N/A", "warpErr": 0.0, "warpErr_01": 0.0 }
 
     # Gather results.
     for t in tList:
