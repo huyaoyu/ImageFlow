@@ -16,6 +16,7 @@ import queue # python3.
 from threading import Thread
 
 from ColorMapping import color_map
+from GeneratePoseName import DummyArgs, generate_pose_name_json
 
 # Global variables used as constants.
 
@@ -559,11 +560,22 @@ def get_magnitude_factor_from_input_parameters(params, args):
 
     return mf
 
+def create_pose_id_file(dataDir, imgDir, pattern, poseFileName):
+    # Create dummy args.
+    args = DummyArgs(dataDir, imgDir, pattern, out_file=poseFileName, silent=True)
+    generate_pose_name_json(args)
+
 def load_pose_id_pose_data(params, args):
     dataDir = params["dataDir"]
 
+    poseIDsFn = dataDir + "/" + params["poseFilename"]
+
+    if ( not os.path.isfile(poseIDsFn) ):
+        # File not exist. Create on the fly.
+        create_pose_id_file( dataDir, params["imageDir"], "*%s" % (params["imageExt"]), params["poseFilename"] )
+
     _, poseIDs = load_IDs_JSON(\
-        dataDir + "/" + params["poseFilename"], params["poseName"])
+        poseIDsFn, params["poseName"])
     poseData   = np.load( dataDir + "/" + params["poseData"] )
     if ( True == args.debug ):
         np.savetxt( dataDir + "/poseData.dat", poseData, fmt="%+.4e" )
