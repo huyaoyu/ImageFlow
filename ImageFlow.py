@@ -8,9 +8,11 @@ import cv2
 import json
 import math
 import matplotlib.pyplot as plt
+import multiprocessing
 import numpy as np
 import numpy.linalg as LA
 import os
+import queue # python3.
 from threading import Thread
 
 from ColorMapping import color_map
@@ -170,14 +172,24 @@ def from_quaternion_to_rotation_matrix(q):
 
     return R
 
-def get_pose_by_ID(ID, poseIDs, poseData):
-    idxPose = poseIDs.index( ID )
-    data    = poseData[idxPose, :].reshape((-1, 1))
+def get_pose_from_line(poseDataLine):
+    """
+    poseDataLine is a 7-element NumPy array. The first 3 elements are 
+    the translations. The remaining 4 elements are the orientation 
+    represented as a quternion.
+    """
+
+    data = poseDataLine.reshape((-1, 1))
     t = data[:3, 0].reshape((-1, 1))
     q = data[3:, 0].reshape((-1, 1))
     R = from_quaternion_to_rotation_matrix(q)
 
     return R.transpose(), -R.transpose().dot(t), q
+
+def get_pose_by_ID(ID, poseIDs, poseData):
+    idxPose = poseIDs.index( ID )
+
+    return get_pose_from_line( poseData[idxPose, :] )
 
 def du_dv(nu, nv, imageSize):
     wIdx = np.linspace( 0, imageSize[1] - 1, imageSize[1] )
@@ -855,10 +867,237 @@ class ImageFlowThread(Thread):
                 self.indexList, self.startII, self.endII, 
                 flagShowFigure=self.flagShowFigure )
 
+def process_single_process(name, outDir, \
+    imgDir, poseID_0, poseID_1, imgSuffix, imgExt, 
+    poseDataLine_0, poseDataLine_1, depth_0, depth_1, distanceRange, 
+    cam_0, cam_1, 
+    flagShowFigure=False, flagDebug=False, debugOutDir="./"):
+    
+    # Get the pose of the first position.
+    R0, t0, q0 = get_pose_from_line(poseDataLine_0)
+    R0Inv = LA.inv(R0)
+
+    if ( flagDebug ):
+        print("t0 = \n{}".format(t0))
+        print("q0 = \n{}".format(q0))
+        print("R0 = \n{}".format(R0))
+        print("R0Inv = \n{}".format(R0Inv))
+
+    # Get the pose of the second position.
+    R1, t1, q1 = get_pose_from_line(poseDataLine_1)
+    R1Inv = LA.inv(R1)
+
+    if ( flagDebug ):
+        print("t1 = \n{}".format(t1))
+        print("q1 = \n{}".format(q1))
+        print("R1 = \n{}".format(R1))
+        print("R1Inv = \n{}".format(R1Inv))
+
+    # Compute the rotation between the two camera poses.
+    R = np.matmul( R1, R0Inv )
+
+    if ( flagDebug ):
+        print("R = \n{}".format(R))
+
+    # Calculate the coordinates in the first camera's frame.
+    X0C = cam_0.from_depth_to_x_y(depth_0) # Coordinates in the camera frame. z-axis pointing forwards.
+    X0  = cam_0.worldRI.dot(X0C)           # Corrdinates in the NED frame. z-axis pointing downwards.
+    
+    if ( flagDebug ):
+        try:
+            output_to_ply(debugOutDir + '/XInCam_0.ply', X0, cam_0.imageSize, distanceRange, CAMERA_ORIGIN)
+        except Exception as e:
+            print("Cannot write PLY file for X0. Exception: ")
+            print(e)
+
+    # The coordinates in the world frame.
+    XWorld_0  = R0Inv.dot(X0 - t0)
+
+    if ( flagDebug ):
+        try:
+            output_to_ply(debugOutDir + "/XInWorld_0.ply", XWorld_0, cam_1.imageSize, distanceRange, -R0Inv.dot(t0))
+        except Exception as e:
+            print("Cannot write PLY file for XWorld_0. Exception: ")
+            print(e)
+
+    # Calculate the coordinates in the second camera's frame.
+    X1C = cam_1.from_depth_to_x_y(depth_1) # Coordinates in the camera frame. z-axis pointing forwards.
+    X1  = cam_1.worldRI.dot(X1C)           # Corrdinates in the NED frame. z-axis pointing downwards.
+
+    if ( flagDebug ):
+        try:
+            output_to_ply(debugOutDir + "/XInCam_1.ply", X1, cam_1.imageSize, distanceRange, CAMERA_ORIGIN)
+        except Exception as e:
+            print("Cannot write PLY file for X1. Exception: ")
+            print(e)
+
+    # The coordiantes in the world frame.
+    XWorld_1 = R1Inv.dot( X1 - t1 )
+
+    if ( flagDebug ):
+        try:
+            output_to_ply(debugOutDir + "/XInWorld_1.ply", XWorld_1, cam_1.imageSize, distanceRange, -R1Inv.dot(t1))
+        except Exception as e:
+            print("Cannot write PLY file for XWorld_1. Exception: ")
+            print(e)
+
+    # ====================================
+    # The coordinate of the pixels of the first camera projected in the second camera's frame (NED).
+    X_01 = R1.dot(XWorld_0) + t1
+
+    if ( flagDebug ):
+        try:
+            output_to_ply(debugOutDir + '/X_01.ply', X_01, cam_0.imageSize, distanceRange, CAMERA_ORIGIN)
+        except Exception as e:
+            print("Cannot write PLY file for X_01. Exception: ")
+            print(e)
+
+    # The image coordinates in the second camera.
+    X_01C = cam_0.worldR.dot(X_01)                  # Camera frame, z-axis pointing forwards.
+    c     = cam_0.from_camera_frame_to_image(X_01C) # Image plane coordinates.
+
+    # Get new u anv v
+    u = c[0, :].reshape(cam_0.imageSize)
+    v = c[1, :].reshape(cam_0.imageSize)
+
+    # Get the du and dv.
+    du, dv = du_dv(u, v, cam_0.imageSize)
+
+    dudv = np.zeros( ( cam_0.imageSize[0], cam_0.imageSize[1], 2), dtype = np.float32 )
+    dudv[:, :, 0] = du
+    dudv[:, :, 1] = dv
+    np.save("%s/%s_flow.npy" % (outDir, poseID_0), dudv)
+
+    # # Calculate the angle and distance.
+    # a, d, angleShift = calculate_angle_distance_from_du_dv( du, dv, flagDegree )
+    # angleAndDist     = make_angle_distance(cam_0, a, d)
+
+    # warp the image to see the result
+    warppedImg, meanWarpError, meanWarpError_01 = warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v)
+
+    return warppedImg, meanWarpError, meanWarpError_01
+
+def worker(name, q, p, inputParams, args):
+    """
+    name: String, the name of this worker process.
+    q: A JoinableQueue.
+    p: A pipe connection object. Only for receiving.
+    """
+
+    print("%s: Worker starts." % (name))
+
+    # ==================== Preparation. ========================
+
+    # Data directory.
+    dataDir = inputParams["dataDir"]
+
+    # The magnitude factor.
+    mf = get_magnitude_factor_from_input_parameters( inputParams, args )
+
+    # Camera.
+    cam_0 = CameraBase(inputParams["camera"]["focal"], inputParams["camera"]["imageSize"])
+
+    # We are assuming that the cameras at the two poses are the same camera.
+    cam_1 = cam_0
+
+    outDir        = dataDir + "/" + inputParams["outDir"]
+    depthDir      = dataDir + "/" + inputParams["depthDir"]
+    imgDir        = dataDir + "/" + inputParams["imageDir"]
+    imgSuffix     = inputParams["imageSuffix"]
+    imgExt        = inputParams["imageExt"]
+    depthTail     = inputParams["depthSuffix"] + inputParams["depthExt"]
+    distanceRange = inputParams["distanceRange"]
+    flagDegree    = inputParams["flagDegree"]
+    warpErrThres  = inputParams["warpErrorThreshold"]
+
+    count = 0
+
+    overWarpErrThresList = []
+    warpErrMaxEntry = { "idx": -1, "poseID_0": "N/A", "poseID_1": "N/A", "warpErr": 0.0, "warpErr_01": 0.0 }
+
+    while (True):
+        if (p.poll()):
+            command = p.recv()
+
+            print("%s: %s command received." % (name, command))
+
+            if ("exit" == command):
+                break
+
+        try:
+            job = q.get(True, 1)
+            # print("{}: {}.".format(name, jobStrList))
+
+            poseID_0 = job["poseID_0"]
+            poseID_1 = job["poseID_1"]
+            poseDataLineList_0 = job["poseLineList_0"]
+            poseDataLineList_1 = job["poseLineList_1"]
+
+            poseDataLine_0 = np.array( poseDataLineList_0 )
+            poseDataLine_1 = np.array( poseDataLineList_1 )
+
+            # Load the depth.
+            depth_0 = np.load( depthDir + "/" + poseID_0 + depthTail )
+            depth_1 = np.load( depthDir + "/" + poseID_1 + depthTail )
+
+            # If it is debugging.
+            if ( args.debug ):
+                debugOutDir = "%s/ImageFlow/%s" % ( dataDir, poseID_0 )
+                test_dir(debugOutDir)
+            else:
+                debugOutDir = "./"
+
+            # Process.
+            warppedImg, meanWarpError, meanWarpError_01 = \
+                process_single_process(name, outDir, 
+                    imgDir, poseID_0, poseID_1, imgSuffix, imgExt, 
+                    poseDataLine_0, poseDataLine_1, depth_0, depth_1, distanceRange, 
+                    cam_0, cam_1, 
+                    flagShowFigure=False, flagDebug=args.debug, debugOutDir=debugOutDir)
+
+            if ( meanWarpError > warpErrThres ):
+                # print("meanWarpError (%f) > warpErrThres (%f). " % ( meanWarpError, warpErrThres ))
+                overWarpErrThresList.append( { "idx": i, "poseID_0": poseID_0, "poseID_1": poseID_1, "meanWarpError": meanWarpError, "meanWarpError_01": meanWarpError_01 } )
+
+            if ( meanWarpError > warpErrMaxEntry["warpErr"] ):
+                warpErrMaxEntry["idx"] = i
+                warpErrMaxEntry["poseID_0"]   = poseID_0
+                warpErrMaxEntry["poseID_1"]   = poseID_1
+                warpErrMaxEntry["warpErr"]    = meanWarpError
+                warpErrMaxEntry["warpErr_01"] = meanWarpError_01
+
+            count += 1
+
+            q.task_done()
+        except queue.Empty as exp:
+            pass
+
+    # TODO:
+    # Save the overWarpErrThresList to file system.
+    
+    print("%s: Done with %d jobs." % (name, count))
+
+def reshape_idx_array(idxArray):
+    N = idxArray.size
+    idxArray = idxArray.astype(np.int64)
+
+    # Find the closest squre root.
+    s = int(math.ceil(math.sqrt(N)))
+
+    # Create a new index array.
+    idx2D = np.zeros( (s*s, ), dtype=np.int64 ) + N
+    idx2D[:N] = idxArray
+
+    # Reshape and transpose.
+    idx2D = idx2D.reshape((s, s)).transpose()
+
+    # Flatten again.
+    return idx2D.reshape((-1, ))
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Compute the image flow data from sequence of camera poses and their depth information.')
 
-    parser.add_argument("--input", help = "The filename of the input JSON file.", default = INPUT_JSON)
+    parser.add_argument("input", help = "The filename of the input JSON file.")
     parser.add_argument("--mf",\
         help = "The iamge magnitude factor. If not specified, the value in the input JSON file will be used. Overwrite the value in the input JSON file is specifiec here.",\
         default = -1.0, type = float)
@@ -890,57 +1129,85 @@ if __name__ == "__main__":
     if ( idxNumberRequest < len(idxList)-1 ):
         idxList = idxList[:idxNumberRequest+1]
 
-    startII, endII = 0, len( idxList ) - 1
+    idxArray = np.array(idxList)
 
-    nThreads = args.np
-    iiStep   = int( ( endII - startII ) / nThreads ) + 1
+    # Reshape the idxArray.
+    idxArrayR = reshape_idx_array(idxArray)
 
-    tList = []
+    # Test the output directory.
+    outDir = inputParams["dataDir"] + "/" + inputParams["outDir"]
+    test_dir(outDir)
 
-    for i in range(nThreads):
-        startII_t = i * iiStep
-        endII_t   = startII_t + iiStep
+    print("Main: Main process.")
 
-        if ( endII_t > endII ):
-            endII_t = endII
-        
-        tList.append( ImageFlowThread( "T%02d" % (i), inputParams, args, poseIDs, poseData, idxList, int(startII_t), int(endII_t), False) )
+    jqueue = multiprocessing.JoinableQueue()
 
-        if ( endII_t == endII ):
-            break
+    processes = []
+    pipes     = []
 
-    print( "Starting %d theads. " % ( len(tList) ) )
+    print("Main: Create %d processes." % (args.np))
 
-    # Start the threads.
-    for t in tList:
-        t.start()
+    for i in range(args.np):
+        [conn1, conn2] = multiprocessing.Pipe(False)
+        processes.append( multiprocessing.Process( \
+            target=worker, args=["P%03d" % (i), jqueue, conn1, \
+                inputParams, args]) )
+        pipes.append(conn2)
 
-    # Join the threads.
-    for t in tList:
-        t.join()
+    for p in processes:
+        p.start()
 
-    overWarpErrThresList = []
-    warpErrMaxEntry      = { "idx": -1, "poseID_0": "N/A", "poseID_1": "N/A", "warpErr": 0.0, "warpErr_01": 0.0 }
+    print("Main: All processes started.")
 
-    # Gather results.
-    for t in tList:
-        overWarpErrThresList = overWarpErrThresList + t.overWarpErrThresList
+    nIdx  = idxArray.size
+    nIdxR = idxArrayR.size
 
-        if ( t.warpErrMaxEntry["warpErr"] > warpErrMaxEntry["warpErr"] ):
-            warpErrMaxEntry = t.warpErrMaxEntry
+    for i in range(nIdxR):
+        # The index of cam_0.
+        idx_0 = int(idxArrayR[i])
 
-    # # Process.
-    # overWarpErrThresList, warpErrMaxEntry = \
-    #     process_single_thread("Single", inputParams, args, poseIDs, poseData, idxList, startII, endII, flagShowFigure=False)
+        if ( idx_0 == nIdx or idx_0 == nIdx - 1):
+            continue
+
+        idx_1 = idx_0 + 1
+
+        # Get the poseIDs.
+        poseID_0 = poseIDs[ idx_0 ]
+        poseID_1 = poseIDs[ idx_1 ]
+
+        # Get the poseDataLines.
+        poseDataLine_0 = poseData[idx_0].reshape((-1, )).tolist()
+        poseDataLine_1 = poseData[idx_1].reshape((-1, )).tolist()
+
+        d = { "poseID_0": poseID_0, "poseID_1": poseID_1, \
+            "poseLineList_0": poseDataLine_0, "poseLineList_1": poseDataLine_1 }
+
+        jqueue.put(d)
+    
+    print("Main: All jobs submitted.")
+
+    jqueue.join()
+
+    print("Main: Queue joined.")
+
+    for p in pipes:
+        p.send("exit")
+
+    print("Main: Exit command sent to all processes.")
+
+    for p in processes:
+        p.join()
+
+    print("Main: All processes joined.")
 
     show_delimiter("Summary.")
     print("%d poses, starting at idx = %d, step = %d, %d steps in total. idxNumberRequest = %d\n" % (nPoses, inputParams["startingIdx"], idxStep, len( idxList )-1, idxNumberRequest))
 
-    print_over_warp_error_list( \
-        overWarpErrThresList, inputParams["warpErrorThreshold"], 
-        inputParams["dataDir"] + "/" + inputParams["outDir"] + "/overWarpErrThresList.csv" )
+    # print_over_warp_error_list( \
+    #     overWarpErrThresList, inputParams["warpErrorThreshold"], 
+    #     inputParams["dataDir"] + "/" + inputParams["outDir"] + "/overWarpErrThresList.csv" )
 
-    print_max_warp_error( warpErrMaxEntry )
+    # print_max_warp_error( warpErrMaxEntry )
 
-    if ( args.mf >= 0 ):
-        print( "Command line argument --mf %f overwrites the parameter \"imageMagnitudeFactor\" (%f) in the input JSON file.\n" % (mf, inputParams["imageMagnitudeFactor"]) )
+    # if ( args.mf >= 0 ):
+    #     print( "Command line argument --mf %f overwrites the parameter \"imageMagnitudeFactor\" (%f) in the input JSON file.\n" % (mf, inputParams["imageMagnitudeFactor"]) )
