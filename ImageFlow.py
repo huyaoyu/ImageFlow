@@ -1297,7 +1297,7 @@ if __name__ == "__main__":
 
     nps = len(processStat)
 
-    for i in rnage(nps):
+    for i in range(nps):
         p = processes[i]
 
         if ( p.is_alive() ):
