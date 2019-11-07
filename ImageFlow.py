@@ -1056,6 +1056,7 @@ def worker(name, jq, rq, p, inputParams, args):
             print("%s: %s command received." % (name, command))
 
             if ("exit" == command):
+                print("%s: exit." % (name))
                 break
 
         try:
@@ -1096,6 +1097,8 @@ def worker(name, jq, rq, p, inputParams, args):
                 "minErr_01": errorTuple[3], "maxErr_01": errorTuple[4], "avgErr_01": errorTuple[5] } )
 
             count += 1
+
+            print("%s: idx = %d. " % (name, job["idx"]))
 
             jq.task_done()
         except queue.Empty as exp:
