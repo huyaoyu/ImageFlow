@@ -1240,6 +1240,7 @@ if __name__ == "__main__":
     rqueue = multiprocessing.Queue()         # The report queue.
 
     processes = []
+    processStat = []
     pipes     = []
 
     print("Main: Create %d processes." % (args.np))
@@ -1250,6 +1251,8 @@ if __name__ == "__main__":
             target=worker, args=["P%03d" % (i), jqueue, rqueue, conn1, \
                 inputParams, args]) )
         pipes.append(conn2)
+
+        processStat.append(1)
 
     for p in processes:
         p.start()
@@ -1292,8 +1295,19 @@ if __name__ == "__main__":
 
     print("Main: Exit command sent to all processes.")
 
-    for p in processes:
-        p.join()
+    nps = len(processStat)
+
+    for i in rnage(nps):
+        p = processes[i]
+
+        if ( p.is_alive() ):
+            p.join(timeout=1)
+
+        if ( p.is_alive() ):
+            print("Main: %d subprocess (pid %d) join timeout. Try to terminate")
+            p.terminate()
+        else:
+            print("Main: %d subprocess (pid %d) joined.", i, p.pid)
 
     print("Main: All processes joined.")
 
