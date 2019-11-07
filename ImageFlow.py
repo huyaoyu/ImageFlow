@@ -15,6 +15,7 @@ import os
 import pandas
 import queue # python3.
 from threading import Thread
+import time
 
 from ColorMapping import color_map
 from GeneratePoseName import DummyArgs, generate_pose_name_json
@@ -1228,6 +1229,8 @@ if __name__ == "__main__":
     else:
         errExDir = None
 
+    startTime = time.time()
+
     print("Main: Main process.")
 
     jqueue = multiprocessing.JoinableQueue() # The job queue.
@@ -1299,8 +1302,11 @@ if __name__ == "__main__":
     save_report(reportFn, report)
     print("Report saved to %s. " % (reportFn))
 
+    endTime = time.time()
+
     show_delimiter("Summary.")
-    print("%d poses, starting at idx = %d, step = %d, %d steps in total. idxNumberRequest = %d\n" % (nPoses, inputParams["startingIdx"], idxStep, len( idxList )-1, idxNumberRequest))
+    print("%d poses, starting at idx = %d, step = %d, %d steps in total. idxNumberRequest = %d. Total time %ds. \n" % \
+        (nPoses, inputParams["startingIdx"], idxStep, len( idxList )-1, idxNumberRequest, endTime-startTime))
 
     # print_over_warp_error_list( \
     #     overWarpErrThresList, inputParams["warpErrorThreshold"], 
