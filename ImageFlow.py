@@ -567,9 +567,16 @@ def load_pose_id_pose_data(params, args):
 
     _, poseIDs = load_IDs_JSON(\
         poseIDsFn, params["poseName"])
-    poseData   = np.load( dataDir + "/" + params["poseData"] )
-    if ( True == args.debug ):
-        np.savetxt( dataDir + "/poseData.dat", poseData, fmt="%+.4e" )
+
+    poseDataFn = dataDir + "/" + params["poseData"]
+    
+    if ( ".txt" == os.path.splitext( os.path.split(poseDataFn)[1] )[1] ):
+        poseData = np.loadtxt( poseDataFn, dtype=np.float32 )
+    else:
+        poseData = np.load( poseDataFn )
+
+        if ( True == args.debug ):
+            np.savetxt( dataDir + "/poseData.dat", poseData, fmt="%+.4e" )
 
     return poseIDs, poseData
 
