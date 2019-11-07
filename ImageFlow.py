@@ -12,6 +12,7 @@ import multiprocessing
 import numpy as np
 import numpy.linalg as LA
 import os
+import pandas
 import queue # python3.
 from threading import Thread
 
@@ -320,7 +321,7 @@ def get_distance_from_coordinate_table(tab, idx):
 
     return math.sqrt( x**2 + y**2 + z**2 )
 
-def create_warp_masks(imageSize, x01, x1, u, v, p=0.01, D=1000):
+def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
     """
     imageSize: height x width.
     x01: The 3D coordinates of the pixels in the first image observed in the frame of the second camera. 3-row 2D array.
@@ -336,6 +337,12 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.01, D=1000):
     assert( u.shape[1] == v.shape[1] )
     assert( u.shape[0] * u.shape[1] == x01.shape[1] )
     assert( x01.shape[0] == 3 )
+
+    SELF_OCC  = 2
+    CROSS_OCC = 1
+
+    OUT_OF_FOV_POSITIVE_Z = 1
+    OUT_OF_FOV_NEGATIVE_Z = 2
 
     # Allocate memory.
     occupancyMap00 = np.zeros( imageSize, dtype=np.int32 ) - 1
@@ -363,7 +370,7 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.01, D=1000):
         # Check if the new index is out of boundary?
         if ( iu < 0 or iv < 0 or iu >= w or iv >= h ):
             # Update the FOV mask.
-            maskFOV[iy, ix] = 1
+            maskFOV[iy, ix] = OUT_OF_FOV_POSITIVE_Z
 
             # Stop the current loop.
             continue
@@ -371,7 +378,7 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.01, D=1000):
         # Check if the current point is on the opposite side of the image plane of the second camera.
         if ( x01[2, i] <= 0 ):
             # Update the FOV mask.
-            maskFOV[iy, ix] = 1
+            maskFOV[iy, ix] = OUT_OF_FOV_NEGATIVE_Z
 
             # Stop the current loop.
             continue
@@ -392,11 +399,11 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.01, D=1000):
             if ( d0 < dr ):
                 # Current point is nearer to the camera.
                 # Update the occlusion mask.
-                maskOcclusion[ opIndex // w, opIndex % w ] = 1
+                maskOcclusion[ opIndex // w, opIndex % w ] = SELF_OCC
             elif ( d0 > dr ):
                 # Current point is farther.
                 # Update the occlusion mask.
-                maskOcclusion[ iy, ix ] = 1
+                maskOcclusion[ iy, ix ] = SELF_OCC
 
                 # Stop the current loop.
                 continue
@@ -410,14 +417,16 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.01, D=1000):
         d1 = get_distance_from_coordinate_table(x1, iv*w + iu)
 
         if ( d0 > D and d1 > D ):
+            # Points at infinity do not occlude each other.
             pass
         elif ( d0 <= d1 or d0 - d1 < p*d1 ):
             # Current point is nearer to the camera or equals the distance of the corresponding pixel in the second image.
+            # This is subject to the value of p. p is not check constantly.
             pass
         else:
             # Current point is occluded by the corresponding pixel in the second image.
             # Update the occlusion mask.
-            maskOcclusion[ iy, ix ] = 2
+            maskOcclusion[ iy, ix ] = CROSS_OCC
 
             if ( -1 != occupancyMap01[iv, iu] ):
                 raise Exception( "Current pixel %d, wins pre-registered %d but occlued by second image at x=%d, y=%d with d0=%f, dr=%f, d1=%f." \
@@ -451,7 +460,7 @@ def warp_error_by_index( img0, img1, u, v, idx0 ):
 
     # Absolute difference.
     diff = img0[idx0, :] - img1[idx1, :]
-    diff = np.linalg.norm( diff, 2, axis=1 )
+    diff = np.sqrt( np.linalg.norm( diff, 2, axis=1 ) )
 
     # Make diff to be an image.
     dImg0 = np.zeros( h*w, dtype=np.float32 )
@@ -490,13 +499,11 @@ def evaluate_warp_error( img0, img1, x01, x1, u, v ):
     dImg0_01, dImg1_01 = warp_error_by_index(img0, img1, u, v, idx0_01)
 
     return dImg0_00, dImg1_00, occupancyMap00, mask00, \
-           dImg0_01, dImg1_01, occupancyMap01, mask01
+           dImg0_01, dImg1_01, occupancyMap01, mask01, maskOcclusion, maskFOV
 
 def warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v):
     cam0ImgFn = "%s/%s%s%s" % ( imgDir, poseID_0, imgSuffix, imgExt )
     cam1ImgFn = "%s/%s%s%s" % ( imgDir, poseID_1, imgSuffix, imgExt )
-    warpErrImgFn = "%s/%s%s%s%s" % ( imgDir, poseID_0, imgSuffix, "_error", imgExt )
-    warpErrStaFn = "%s/%s%s%s%s" % ( imgDir, poseID_0, imgSuffix, "_error", ".dat" )
 
     # print("Warp %s." % (cam0ImgFn))
     cam0_img = cv2.imread( cam0ImgFn, cv2.IMREAD_UNCHANGED )
@@ -505,40 +512,24 @@ def warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v):
     cam1_img = cv2.imread( cam1ImgFn, cv2.IMREAD_UNCHANGED )
     
     dImg0_00, dImg1_00, occupancyMap_00, occupancyMask_00, \
-    dImg0_01, dImg1_01, occupancyMap_01, occupancyMask_01 \
+    dImg0_01, dImg1_01, occupancyMap_01, occupancyMask_01, \
+    maskOcc, maskFOV \
          = evaluate_warp_error( cam0_img, cam1_img, X_01C, X1C, u, v )
 
-    save_float_image( warpErrImgFn, dImg1_00 )
-
-    # The mean warp error over the valid pixels in the seconde image.
-    meanError_00 = dImg1_00[occupancyMask_00].mean()
-    meanError_01 = dImg1_01[occupancyMask_01].mean()
-
-    np.savetxt( warpErrStaFn, \
-        np.array([ dImg1_00[occupancyMask_00].min(), dImg1_00.max(), meanError_00, dImg1_01[occupancyMask_01].min(), dImg1_01.max(), meanError_01 ]).reshape((-1, 1)) )
-
+    # Warp the image.
     warppedImg = np.zeros_like(cam0_img)
     
-    # for h in range(cam0_img.shape[0]):
-    #     for w in range(cam0_img.shape[1]):
-    #         u_w, v_w = int(round(u[h,w])), int(round(v[h,w]))
-    #         if u_w < cam0_img.shape[1] and v_w < cam0_img.shape[0] and u_w >= 0 and v_w >= 0:
-    #             warppedImg[v_w, u_w, :] = cam0_img[h, w, :]
-    
-    # validWarpMask = occupancyMap_00 != -1
     validWarpMask = occupancyMask_00
     validWarpIdx  = occupancyMap_00[validWarpMask]
 
+    # Reshape to (HxW, C)
     cam0ImgCpy = copy.deepcopy(cam0_img).reshape( (-1, cam0_img.shape[2]) )
     warppedImg = warppedImg.reshape( (-1, cam0_img.shape[2]) )
+
     warppedImg[validWarpMask.reshape( (-1,) ), :] = cam0ImgCpy[ validWarpIdx, : ]
     warppedImg = warppedImg.reshape( cam0_img.shape )
 
-    # Save the warpped image.
-    cam0WrpFn = "%s/%s%s%s%s" % ( imgDir, poseID_0, imgSuffix, "_warp", imgExt )
-    cv2.imwrite(cam0WrpFn, warppedImg)
-
-    return warppedImg, meanError_00, meanError_01
+    return maskOcc, maskFOV, warppedImg, dImg1_00, dImg1_01, occupancyMask_00, occupancyMask_01
 
 def read_input_parameters_from_json(fn):
     fpJSON = open(fn, "r")
@@ -883,6 +874,7 @@ def process_single_process(name, outDir, \
     imgDir, poseID_0, poseID_1, imgSuffix, imgExt, 
     poseDataLine_0, poseDataLine_1, depth_0, depth_1, distanceRange, 
     cam_0, cam_1, 
+    flagErrorExtra=False, errorExtraDir=None, 
     flagShowFigure=False, flagDebug=False, debugOutDir="./"):
     
     # Get the pose of the first position.
@@ -985,14 +977,34 @@ def process_single_process(name, outDir, \
     # angleAndDist     = make_angle_distance(cam_0, a, d)
 
     # warp the image to see the result
-    warppedImg, meanWarpError, meanWarpError_01 = warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v)
+    maskOcc, maskFOV, warppedImg, dImg1_00, dImg1_01, occupancyMask_00, occupancyMask_01 \
+         = warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v)
 
-    return warppedImg, meanWarpError, meanWarpError_01
+    # The mean warp error over the valid pixels in the seconde image.
+    minError_00  = dImg1_00[occupancyMask_00].min()
+    maxError_00  = dImg1_00.max()
+    meanError_00 = dImg1_00[occupancyMask_00].mean()
+    minError_01  = dImg1_01[occupancyMask_01].min()
+    maxError_01  = dImg1_01.max()
+    meanError_01 = dImg1_01[occupancyMask_01].mean()
 
-def worker(name, q, p, inputParams, args):
+    if ( flagErrorExtra ):
+        warpErrImgFn = "%s/%s_%s%s%s%s" % ( errorExtraDir, poseID_0, poseID_1, imgSuffix, "_error_00", imgExt )
+        
+        # Save the error image.
+        save_float_image( warpErrImgFn, dImg1_00 )
+
+        # Save the warpped image.
+        cam0WrpFn = "%s/%s_%s%s%s%s" % ( errorExtraDir, poseID_0, poseID_1, imgSuffix, "_warp", imgExt )
+        cv2.imwrite(cam0WrpFn, warppedImg)
+
+    return warppedImg, ( minError_00, maxError_00, meanError_00, minError_01, maxError_01, meanError_01 )
+
+def worker(name, jq, rq, p, inputParams, args):
     """
     name: String, the name of this worker process.
-    q: A JoinableQueue.
+    jq: A JoinableQueue. The job queue.
+    rq: The report queue.
     p: A pipe connection object. Only for receiving.
     """
 
@@ -1022,10 +1034,12 @@ def worker(name, q, p, inputParams, args):
     flagDegree    = inputParams["flagDegree"]
     warpErrThres  = inputParams["warpErrorThreshold"]
 
-    count = 0
+    if ( args.save_error_extra ):
+        errExDir = "%s%s" % ( outDir, args.error_extra_dir_suffix )
+    else:
+        errExDir = None
 
-    overWarpErrThresList = []
-    warpErrMaxEntry = { "idx": -1, "poseID_0": "N/A", "poseID_1": "N/A", "warpErr": 0.0, "warpErr_01": 0.0 }
+    count = 0
 
     while (True):
         if (p.poll()):
@@ -1037,7 +1051,7 @@ def worker(name, q, p, inputParams, args):
                 break
 
         try:
-            job = q.get(True, 1)
+            job = jq.get(True, 1)
             # print("{}: {}.".format(name, jobStrList))
 
             poseID_0 = job["poseID_0"]
@@ -1060,32 +1074,24 @@ def worker(name, q, p, inputParams, args):
                 debugOutDir = "./"
 
             # Process.
-            warppedImg, meanWarpError, meanWarpError_01 = \
+            warppedImg, errorTuple = \
                 process_single_process(name, outDir, 
                     imgDir, poseID_0, poseID_1, imgSuffix, imgExt, 
                     poseDataLine_0, poseDataLine_1, depth_0, depth_1, distanceRange, 
                     cam_0, cam_1, 
+                    flagErrorExtra=args.save_error_extra, errorExtraDir=errExDir,
                     flagShowFigure=False, flagDebug=args.debug, debugOutDir=debugOutDir)
 
-            if ( meanWarpError > warpErrThres ):
-                # print("meanWarpError (%f) > warpErrThres (%f). " % ( meanWarpError, warpErrThres ))
-                overWarpErrThresList.append( { "idx": i, "poseID_0": poseID_0, "poseID_1": poseID_1, "meanWarpError": meanWarpError, "meanWarpError_01": meanWarpError_01 } )
-
-            if ( meanWarpError > warpErrMaxEntry["warpErr"] ):
-                warpErrMaxEntry["idx"] = i
-                warpErrMaxEntry["poseID_0"]   = poseID_0
-                warpErrMaxEntry["poseID_1"]   = poseID_1
-                warpErrMaxEntry["warpErr"]    = meanWarpError
-                warpErrMaxEntry["warpErr_01"] = meanWarpError_01
+            rq.put( { "idx": job["idx"], \
+                "poseID_0": poseID_0, "poseID_1": poseID_1, 
+                "minErr_00": errorTuple[0], "maxErr_00": errorTuple[1], "avgErr_00": errorTuple[2],
+                "minErr_01": errorTuple[3], "maxErr_01": errorTuple[4], "avgErr_01": errorTuple[5] } )
 
             count += 1
 
-            q.task_done()
+            jq.task_done()
         except queue.Empty as exp:
             pass
-
-    # TODO:
-    # Save the overWarpErrThresList to file system.
     
     print("%s: Done with %d jobs." % (name, count))
 
@@ -1106,14 +1112,72 @@ def reshape_idx_array(idxArray):
     # Flatten again.
     return idx2D.reshape((-1, ))
 
+def process_report_queue(rq):
+    """
+    rq: A Queue object containing the report data.
+    """
+
+    count = 0
+
+    mergedDict = { "idx": [], "poseID_0": [], "poseID_1": [], \
+        "minErr_00": [], "maxErr_00": [], "avgErr_00": [], \
+        "minErr_01": [], "maxErr_01": [], "avgErr_01": [] }
+
+    try:
+        while (True):
+            r = rq.get(block=False)
+
+            mergedDict['idx'].append( r["idx"] )
+            mergedDict['poseID_0'].append( r["poseID_0"] )
+            mergedDict['poseID_1'].append( r["poseID_1"] )
+            mergedDict['minErr_00'].append( r["minErr_00"] )
+            mergedDict['maxErr_00'].append( r["maxErr_00"] )
+            mergedDict['avgErr_00'].append( r["avgErr_00"] )
+            mergedDict['minErr_01'].append( r["minErr_01"] )
+            mergedDict['maxErr_01'].append( r["maxErr_01"] )
+            mergedDict['avgErr_01'].append( r["avgErr_01"] )
+
+            count += 1
+    except queue.Empty as ex:
+        pass
+
+    return mergedDict
+
+def save_report(fn, report):
+    """
+    fn: the output filename.
+    report: a dictonary contains the data.
+
+    This function will use pandas package to output the report as a CSV file.
+    """
+
+    # Create the DataFrame object.
+    df = pandas.DataFrame.from_dict(report, orient="columns")
+
+    # Sort the rows according to the index column.
+    df.sort_values(by=["idx"], ascending=True, inplace=True)
+
+    # Save the file.
+    df.to_csv(fn, index=False)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Compute the image flow data from sequence of camera poses and their depth information.')
 
-    parser.add_argument("input", help = "The filename of the input JSON file.")
-    parser.add_argument("--mf",\
-        help = "The iamge magnitude factor. If not specified, the value in the input JSON file will be used. Overwrite the value in the input JSON file is specifiec here.",\
-        default = -1.0, type = float)
-    parser.add_argument("--debug", help = "Debug information including 3D point clouds will be written addintionally.", action = "store_true", default = False)
+    parser.add_argument("input", type=str, \
+        help = "The filename of the input JSON file.")
+
+    parser.add_argument("--mf", type=float, default = -1.0, \
+        help = "The iamge magnitude factor. If not specified, the value in the input JSON file will be used. Overwrite the value in the input JSON file is specifiec here.")
+    
+    parser.add_argument("--debug", action = "store_true", default = False, \
+        help = "Debug information including 3D point clouds will be written addintionally.")
+    
+    parser.add_argument("--save-error-extra", action="store_true", default=False, \
+        help="Save the extra error evaluation files.")
+
+    parser.add_argument("--error-extra-dir-suffix", type=str, default="_error", \
+        help="The folder name suffix which will be appended to the output folder name. The new folder name is used for saving extra error evaluations. This argument is only used when --save-error-extra is issued.")
+
     parser.add_argument("--np", type=int, default=1, \
         help="Number of threads.")
 
@@ -1150,9 +1214,17 @@ if __name__ == "__main__":
     outDir = inputParams["dataDir"] + "/" + inputParams["outDir"]
     test_dir(outDir)
 
+    # Check if we are saving the extra error evaluations.
+    if ( args.save_error_extra ):
+        errExDir = "%s%s" % ( outDir, args.error_extra_dir_suffix )
+        test_dir(errExDir)
+    else:
+        errExDir = None
+
     print("Main: Main process.")
 
-    jqueue = multiprocessing.JoinableQueue()
+    jqueue = multiprocessing.JoinableQueue() # The job queue.
+    rqueue = multiprocessing.Queue()         # The report queue.
 
     processes = []
     pipes     = []
@@ -1162,7 +1234,7 @@ if __name__ == "__main__":
     for i in range(args.np):
         [conn1, conn2] = multiprocessing.Pipe(False)
         processes.append( multiprocessing.Process( \
-            target=worker, args=["P%03d" % (i), jqueue, conn1, \
+            target=worker, args=["P%03d" % (i), jqueue, rqueue, conn1, \
                 inputParams, args]) )
         pipes.append(conn2)
 
@@ -1191,7 +1263,7 @@ if __name__ == "__main__":
         poseDataLine_0 = poseData[idx_0].reshape((-1, )).tolist()
         poseDataLine_1 = poseData[idx_1].reshape((-1, )).tolist()
 
-        d = { "poseID_0": poseID_0, "poseID_1": poseID_1, \
+        d = { "idx": idx_0, "poseID_0": poseID_0, "poseID_1": poseID_1, \
             "poseLineList_0": poseDataLine_0, "poseLineList_1": poseDataLine_1 }
 
         jqueue.put(d)
@@ -1211,6 +1283,14 @@ if __name__ == "__main__":
         p.join()
 
     print("Main: All processes joined.")
+
+    # Process the rqueue.
+    report = process_report_queue(rqueue)
+
+    # Save the report to file.
+    reportFn = "%s/Report.csv" % (outDir)
+    save_report(reportFn, report)
+    print("Report saved to %s. " % (reportFn))
 
     show_delimiter("Summary.")
     print("%d poses, starting at idx = %d, step = %d, %d steps in total. idxNumberRequest = %d\n" % (nPoses, inputParams["startingIdx"], idxStep, len( idxList )-1, idxNumberRequest))
