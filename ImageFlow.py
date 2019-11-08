@@ -48,6 +48,12 @@ PLY_COLOR_LEVELS = 20
 WORLD_ORIGIN  = np.zeros((3, 1))
 CAMERA_ORIGIN = np.zeros((3, 1))
 
+SELF_OCC  = 2
+CROSS_OCC = 1
+
+OUT_OF_FOV_POSITIVE_Z = 11
+OUT_OF_FOV_NEGATIVE_Z = 12
+
 def show_delimiter(title = "", c = "=", n = 50, leading = "\n", ending = "\n"):
     d = [c for i in range( int(n/2) )]
     s = "".join(d) + " " + title + " " + "".join(d)
@@ -338,12 +344,6 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
     assert( u.shape[1] == v.shape[1] )
     assert( u.shape[0] * u.shape[1] == x01.shape[1] )
     assert( x01.shape[0] == 3 )
-
-    SELF_OCC  = 2
-    CROSS_OCC = 1
-
-    OUT_OF_FOV_POSITIVE_Z = 1
-    OUT_OF_FOV_NEGATIVE_Z = 2
 
     # Allocate memory.
     occupancyMap00 = np.zeros( imageSize, dtype=np.int32 ) - 1
@@ -878,6 +878,57 @@ class ImageFlowThread(Thread):
                 self.indexList, self.startII, self.endII, 
                 flagShowFigure=self.flagShowFigure )
 
+def save_flow(fnBase, flowSuffix, maskSuffix, du, dv, maskOcc, maskFOV):
+    """
+    fnBase: The file name base.
+    flowSuffix: Filename suffix of the optical flow file.
+    maskSuffix: Filename suffix of the mask file.
+    du, dv: The opitcal flow saved as NumPy array with dtype=numpy.float32.
+    maskOcc: The occlusion mask. NumPy array with dtype=numpy.uint8.
+    maskFOV: The FOV mask. NumPy array with dtype=numpy.uint8.
+
+    Values saved in maskOcc and maskFOV are interpreted by referring to 
+    SELF_OCC, CROSS_OCC, OUT_OF_FOV_POSITIVE_Z, OUT_OF_FOV_NEGATIVE_Z.
+
+    Optical flow masked as OUT_OF_FOV_NEGATIVE_Z will be labeled as invalid.
+    Other labels in maskOcc and maskFOV will be fused into a single mask file.
+
+    The optical flow file will be saved as a binary NumPy output with dytpe=numpy.float32.
+    The mask file will be saved as a binary NumPy output with dtype=numpy.uint8.
+    - A 0 in the mask file means invalid pixel.
+    - A 255 in the mask file means valid non-occluded pixel.
+    - Values of SELF_OCC, CROSS_OCC, and OUT_OF_FOV_POSITIVE_Z are used to indicate general 
+    occlusion. 
+    The mask file is obtained by first setting the NumPy array to all 255. Then assign SELF_OCC, 
+    CROSS_OCC, OUT_OF_FOV_POSITIVE_Z orderly. Finally, 0 value is assigned according to the 
+    OUT_OF_FOV_NEGATIVE_Z distribution in maskFOV.
+
+    All invalid flow is set to zero.
+    """
+
+    # Create a 2-channel NumPy array.
+    flow = np.stack([du, dv], axis=-1).astype(np.float32)
+
+    # Create a 1-channel NumPy array.
+    mask = np.zeros_like(du, dtype=np.uint8) + 255
+
+    tempMask = maskOcc == SELF_OCC
+    mask[tempMask] = SELF_OCC
+
+    tempMask = maskOcc == CROSS_OCC
+    mask[tempMask] = CROSS_OCC
+
+    tempMask = maskFOV == OUT_OF_FOV_POSITIVE_Z
+    mask[tempMask] = OUT_OF_FOV_POSITIVE_Z
+
+    tempMask = maskFOV == OUT_OF_FOV_NEGATIVE_Z
+    mask[tempMask] = 0
+    flow[tempMask] = np.array([0.0, 0.0])
+
+    # Save the files.
+    np.save( "%s%s.npy" % (fnBase, flowSuffix), flow )
+    np.save( "%s%s.npy" % (fnBase, maskSuffix), mask )
+
 def process_single_process(name, outDir, \
     imgDir, poseID_0, poseID_1, imgSuffix, imgExt, 
     poseDataLine_0, poseDataLine_1, depth_0, depth_1, distanceRange, 
@@ -976,9 +1027,6 @@ def process_single_process(name, outDir, \
     du, dv = du_dv(u, v, cam_0.imageSize)
 
     dudv = np.zeros( ( cam_0.imageSize[0], cam_0.imageSize[1], 2), dtype = np.float32 )
-    dudv[:, :, 0] = du
-    dudv[:, :, 1] = dv
-    np.save("%s/%s_flow.npy" % (outDir, poseID_0), dudv)
 
     # # Calculate the angle and distance.
     # a, d, angleShift = calculate_angle_distance_from_du_dv( du, dv, flagDegree )
@@ -987,6 +1035,8 @@ def process_single_process(name, outDir, \
     # warp the image to see the result
     maskOcc, maskFOV, warppedImg, dImg1_00, dImg1_01, occupancyMask_00, occupancyMask_01 \
          = warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v)
+
+    save_flow( "%s/%s" % (outDir, poseID_0), "_flow", "_mask", du, dv, maskOcc, maskFOV )
 
     # The mean warp error over the valid pixels in the seconde image.
     minError_00  = dImg1_00[occupancyMask_00].min()
@@ -1008,15 +1058,58 @@ def process_single_process(name, outDir, \
 
     return warppedImg, ( minError_00, maxError_00, meanError_00, minError_01, maxError_01, meanError_01 )
 
-def worker(name, jq, rq, p, inputParams, args):
+def logging_worker(name, jq, p, workingDir):
+    import logging
+
+    logger = logging.getLogger("ImageFlow")
+    logger.setLevel(logging.INFO)
+
+    logFn = "%s/Log.log" % (workingDir)
+    print(logFn)
+
+    fh = logging.FileHandler( logFn, "w" )
+    fh.setLevel(logging.INFO)
+
+    sh = logging.StreamHandler()
+    sh.setLevel(logging.INFO)
+
+    logger.addHandler(fh)
+    logger.addHandler(sh)
+
+    logger.info("%s: Logger initialized." % (name))
+
+    while (True):
+        if (p.poll()):
+            command = p.recv()
+
+            print("%s: %s command received." % (name, command))
+
+            if ("exit" == command):
+                # print("%s: exit." % (name))
+                break
+        
+        try:
+            job = jq.get(False)
+            # print("{}: {}.".format(name, jobStrList))
+
+            logger.info(job)
+
+            jq.task_done()
+        except queue.Empty as exp:
+            pass
+    
+    logger.info("Logger exited.")
+
+def worker(name, jq, rq, lq, p, inputParams, args):
     """
     name: String, the name of this worker process.
     jq: A JoinableQueue. The job queue.
     rq: The report queue.
+    lq: The logger queue.
     p: A pipe connection object. Only for receiving.
     """
 
-    print("%s: Worker starts." % (name))
+    lq.put("%s: Worker starts." % (name))
 
     # ==================== Preparation. ========================
 
@@ -1053,10 +1146,10 @@ def worker(name, jq, rq, p, inputParams, args):
         if (p.poll()):
             command = p.recv()
 
-            print("%s: %s command received." % (name, command))
+            lq.put("%s: %s command received." % (name, command))
 
             if ("exit" == command):
-                print("%s: exit." % (name))
+                # print("%s: exit." % (name))
                 break
 
         try:
@@ -1098,13 +1191,13 @@ def worker(name, jq, rq, p, inputParams, args):
 
             count += 1
 
-            print("%s: idx = %d. " % (name, job["idx"]))
+            lq.put("%s: idx = %d. " % (name, job["idx"]))
 
             jq.task_done()
         except queue.Empty as exp:
             pass
     
-    print("%s: Done with %d jobs." % (name, count))
+    lq.put("%s: Done with %d jobs." % (name, count))
 
 def reshape_idx_array(idxArray):
     N = idxArray.size
@@ -1236,19 +1329,28 @@ if __name__ == "__main__":
 
     print("Main: Main process.")
 
-    jqueue = multiprocessing.JoinableQueue() # The job queue.
-    rqueue = multiprocessing.Queue()         # The report queue.
+    jqueue  = multiprocessing.JoinableQueue() # The job queue.
+    manager = multiprocessing.Manager()
+    rqueue  = manager.Queue()         # The report queue.
 
-    processes = []
+    loggerQueue = multiprocessing.JoinableQueue()
+    [conn1, loggerPipe] = multiprocessing.Pipe(False)
+
+    loggerProcess = multiprocessing.Process( \
+        target=logging_worker, args=["Logger", loggerQueue, conn1, inputParams["dataDir"]] )
+
+    loggerProcess.start()
+
+    processes   = []
     processStat = []
-    pipes     = []
+    pipes       = []
 
-    print("Main: Create %d processes." % (args.np))
+    loggerQueue.put("Main: Create %d processes." % (args.np))
 
     for i in range(args.np):
         [conn1, conn2] = multiprocessing.Pipe(False)
         processes.append( multiprocessing.Process( \
-            target=worker, args=["P%03d" % (i), jqueue, rqueue, conn1, \
+            target=worker, args=["P%03d" % (i), jqueue, rqueue, loggerQueue, conn1, \
                 inputParams, args]) )
         pipes.append(conn2)
 
@@ -1257,7 +1359,8 @@ if __name__ == "__main__":
     for p in processes:
         p.start()
 
-    print("Main: All processes started.")
+    loggerQueue.put("Main: All processes started.")
+    loggerQueue.join()
 
     nIdx  = idxArray.size
     nIdxR = idxArrayR.size
@@ -1284,16 +1387,37 @@ if __name__ == "__main__":
 
         jqueue.put(d)
     
-    print("Main: All jobs submitted.")
+    loggerQueue.put("Main: All jobs submitted.")
 
     jqueue.join()
 
-    print("Main: Queue joined.")
+    loggerQueue.put("Main: Job queue joined.")
+    loggerQueue.join()
 
+    # Process the rqueue.
+    report = process_report_queue(rqueue)
+
+    # Save the report to file.
+    reportFn = "%s/Report.csv" % (outDir)
+    save_report(reportFn, report)
+    loggerQueue.put("Report saved to %s. " % (reportFn))
+
+    endTime = time.time()
+
+    show_delimiter("Summary.")
+    loggerQueue.put("%d poses, starting at idx = %d, step = %d, %d steps in total. idxNumberRequest = %d. Total time %ds. \n" % \
+        (nPoses, inputParams["startingIdx"], idxStep, len( idxList )-1, idxNumberRequest, endTime-startTime))
+
+    if ( args.mf >= 0 ):
+        loggerQueue.put( "Command line argument --mf %f overwrites the parameter \"imageMagnitudeFactor\" (%f) in the input JSON file.\n" % (mf, inputParams["imageMagnitudeFactor"]) )
+
+    # Stop all subprocesses.
     for p in pipes:
         p.send("exit")
 
-    print("Main: Exit command sent to all processes.")
+    loggerQueue.put("Main: Exit command sent to all processes.")
+
+    loggerQueue.join()
 
     nps = len(processStat)
 
@@ -1304,32 +1428,20 @@ if __name__ == "__main__":
             p.join(timeout=1)
 
         if ( p.is_alive() ):
-            print("Main: %d subprocess (pid %d) join timeout. Try to terminate" % (i, p.pid))
+            loggerQueue.put("Main: %d subprocess (pid %d) join timeout. Try to terminate" % (i, p.pid))
             p.terminate()
         else:
-            print("Main: %d subprocess (pid %d) joined." % (i, p.pid))
+            processStat[i] = 0
+            loggerQueue.put("Main: %d subprocess (pid %d) joined." % (i, p.pid))
 
-    print("Main: All processes joined.")
+    if (not 1 in processStat ):
+        loggerQueue.put("Main: All processes joined. ")
+    else:
+        loggerQueue.put("Main: Some process is forced to be terminated. ")
 
-    # Process the rqueue.
-    report = process_report_queue(rqueue)
+    # Stop the logger.
+    loggerQueue.join()
+    loggerPipe.send("exit")
+    loggerProcess.join()
 
-    # Save the report to file.
-    reportFn = "%s/Report.csv" % (outDir)
-    save_report(reportFn, report)
-    print("Report saved to %s. " % (reportFn))
-
-    endTime = time.time()
-
-    show_delimiter("Summary.")
-    print("%d poses, starting at idx = %d, step = %d, %d steps in total. idxNumberRequest = %d. Total time %ds. \n" % \
-        (nPoses, inputParams["startingIdx"], idxStep, len( idxList )-1, idxNumberRequest, endTime-startTime))
-
-    # print_over_warp_error_list( \
-    #     overWarpErrThresList, inputParams["warpErrorThreshold"], 
-    #     inputParams["dataDir"] + "/" + inputParams["outDir"] + "/overWarpErrThresList.csv" )
-
-    # print_max_warp_error( warpErrMaxEntry )
-
-    # if ( args.mf >= 0 ):
-    #     print( "Command line argument --mf %f overwrites the parameter \"imageMagnitudeFactor\" (%f) in the input JSON file.\n" % (mf, inputParams["imageMagnitudeFactor"]) )
+    print("Main: Done.")

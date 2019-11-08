@@ -6,3 +6,4 @@ sample/ImageFlow
 *.png
 *.jpg
 *.ipynb
+*.log
