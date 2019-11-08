@@ -434,6 +434,8 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
             continue
 
         showDetail = False
+        if ( iy == 118 and ix == 310 ):
+            showDetail = True
 
         # Get the current depth.
         d0, ddMin, ddMax = get_distance_from_coordinate_table(x01, h, w, iy, ix, showDetail)
@@ -452,11 +454,13 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
             if ( d0 < dr ):
                 # Current point is nearer to the camera.
                 # Update the occlusion mask.
-                maskOcclusion[ opIndex // w, opIndex % w ] = SELF_OCC
+                if ( maskOcclusion[ opIndex // w, opIndex % w ] == 0 ):
+                    maskOcclusion[ opIndex // w, opIndex % w ] = SELF_OCC
             elif ( d0 > dr ):
                 # Current point is farther.
                 # Update the occlusion mask.
-                maskOcclusion[ iy, ix ] = SELF_OCC
+                if ( maskOcclusion[ iy, ix ] == 0 ):
+                    maskOcclusion[ iy, ix ] = SELF_OCC
 
                 # Stop the current loop.
                 continue
@@ -468,6 +472,8 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
 
         # Get the depth at x=iu, y=iv in the second image observed in the second camera.
         d1, ddMin, ddMax = get_distance_from_coordinate_table(x1, h, w, iv, iu, showDetail)
+        if (showDetail):
+            print("d0 = %f, dr = %f, d1 = %f, ddMin = %f, ddMax = %f. " % ( d0, dr, d1, ddMin, ddMax ))
 
         if ( d0 > D and d1 > D ):
             # Points at infinity do not occlude each other.
@@ -480,6 +486,9 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
             # Current point is occluded by the corresponding pixel in the second image.
             # Update the occlusion mask.
             maskOcclusion[ iy, ix ] = CROSS_OCC
+
+            if (showDetail):
+                print( "(iy %d, ix %d) cross-occ." % (iy, ix) )
 
             if ( -1 != occupancyMap01[iv, iu] ):
                 # if ( occupancyMap01[iv, iu] == opIndex ):
