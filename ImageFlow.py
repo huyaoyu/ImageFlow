@@ -434,8 +434,8 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
             continue
 
         showDetail = False
-        if ( iy == 118 and ix == 310 ):
-            showDetail = True
+        # if ( iy == 118 and ix == 310 ):
+        #     showDetail = True
 
         # Get the current depth.
         d0, ddMin, ddMax = get_distance_from_coordinate_table(x01, h, w, iy, ix, showDetail)
