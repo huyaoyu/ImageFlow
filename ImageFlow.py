@@ -208,7 +208,7 @@ def du_dv(nu, nv, imageSize):
 
     return nu - u, nv - v
 
-def show(ang, mag, outDir = None, waitTime = None, magFactor = 1.0, angShift = 0.0, flagShowFigure=True):
+def show(ang, mag, mask=None, outDir=None, outName="bgr", waitTime=None, magFactor=1.0, angShift=0.0, flagShowFigure=True):
     """ang: degree"""
     # Use Hue, Saturation, Value colour model 
     hsv = np.zeros( ( ang.shape[0], ang.shape[1], 3 ) , dtype=np.uint8)
@@ -220,8 +220,12 @@ def show(ang, mag, outDir = None, waitTime = None, magFactor = 1.0, angShift = 0
     hsv[..., 2] = np.clip(mag * magFactor, 0, 255).astype(np.uint8) #cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX)
     bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
 
+    if ( mask is not None ):
+        mask = mask != 255
+        bgr[mask] = np.array([0, 0 ,0])
+
     if ( outDir is not None ):
-        cv2.imwrite(outDir + "/bgr.jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 100])
+        cv2.imwrite(outDir + "/%s_vis.png" % (outName), bgr, [cv2.IMWRITE_PNG_COMPRESSION, 0])
 
     if ( True == flagShowFigure ):
         cv2.imshow("HSV2GBR", bgr)
@@ -312,21 +316,56 @@ class CameraBase(object):
 
         return coor
 
-def get_distance_from_coordinate_table(tab, idx):
+def get_center_and_neighbors(h, w, i, j):
+    c = i*w+j
+    idx = [c] # Center.
+    
+    if ( j == 0 ):
+        idx.append( c+1 )
+        idx.append( c+1 )
+    elif ( j == w - 1 ):
+        idx.append( c-1 )
+        idx.append( c-1 )
+    else:
+        idx.append( c-1 )
+        idx.append( c+1 )
+
+    if ( i == 0 ):
+        idx.append( c+w )
+        idx.append( c+w )
+    elif ( i == h - 1 ):
+        idx.append( c-w )
+        idx.append( c-w )
+    else:
+        idx.append( c-w )
+        idx.append( c+w )
+
+    return idx
+
+def get_distance_from_coordinate_table(tab, h, w, i, j):
     """
     tab: A 3-row table contains 3D coordinates.
-    idx: The column idex.
+    h, w: The height and width of the original image.
+    i, j: The indices along the height and width directions.
 
     This funcion will return the distance of a point specified
-    by idx measured from the origin.
+    by i, j, and its 4 neighbors.
     """
 
-    # Get the x, y, z
+    idx = get_center_and_neighbors( h, w, i, j )
+
+    # Get the x, y, z.
     x = tab[0, idx]
     y = tab[1, idx]
     z = tab[2, idx]
 
-    return math.sqrt( x**2 + y**2 + z**2 )
+    dist = np.sqrt( x**2 + y**2 + z**2 )
+
+    c = dist[0]
+
+    dd = np.absolute(dist[1:] - c).max()
+
+    return c, dd
 
 def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
     """
@@ -385,7 +424,8 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
             continue
 
         # Get the current depth.
-        d0 = get_distance_from_coordinate_table(x01, i)
+        d0, dd = get_distance_from_coordinate_table(x01, h, w, iy, ix)
+        dr = 0.0
 
         # Check if the new index is occupied.
         if ( -1 != occupancyMap00[iv, iu] ):
@@ -395,7 +435,7 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
             opIndex = occupancyMap00[iv, iu]
 
             # Get the depth at the registered index.
-            dr = get_distance_from_coordinate_table(x01, opIndex)
+            dr, dd = get_distance_from_coordinate_table(x01, h, w, opIndex // w, opIndex % w)
 
             if ( d0 < dr ):
                 # Current point is nearer to the camera.
@@ -415,12 +455,12 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
         occupancyMap00[ iv, iu ] = i
 
         # Get the depth at x=iu, y=iv in the second image observed in the second camera.
-        d1 = get_distance_from_coordinate_table(x1, iv*w + iu)
+        d1, dd = get_distance_from_coordinate_table(x1, h, w, iv, iu)
 
         if ( d0 > D and d1 > D ):
             # Points at infinity do not occlude each other.
             pass
-        elif ( d0 <= d1 or d0 - d1 < p*d1 ):
+        elif ( d0 <= d1 or d0 - d1 <= dd ):
             # Current point is nearer to the camera or equals the distance of the corresponding pixel in the second image.
             # This is subject to the value of p. p is not check constantly.
             pass
@@ -429,14 +469,25 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
             # Update the occlusion mask.
             maskOcclusion[ iy, ix ] = CROSS_OCC
 
+            if ( 358 == iu and 220 == iv ):
+                print("Current pixel %d, d0=%f, dr=%f, d1=%f, dd=%f. " \
+                        % ( i, d0, dr, d1, dd ))
+
             if ( -1 != occupancyMap01[iv, iu] ):
-                raise Exception( "Current pixel %d, wins pre-registered %d but occlued by second image at x=%d, y=%d with d0=%f, dr=%f, d1=%f." \
-                    % ( i, opIndex, iu, iv, d0, dr, d1 ) )
+                # if ( occupancyMap01[iv, iu] == opIndex ):
+                #     continue
+
+                raise Exception( "Current pixel %d, wins pre-registered %d but occlued by second image at x=%d, y=%d (occupancyMap01: %d) with d0=%f, dr=%f, d1=%f, dd=%f. " \
+                    % ( i, opIndex, iu, iv, occupancyMap01[iv, iu], d0, dr, d1, dd ) )
 
             continue
 
         # Update the occupancy map.
         occupancyMap01[ iv, iu ] = i
+
+        if ( 358 == iu and 220 == iv ):
+            print("Current pixel %d, d0=%f, dr=%f, d1=%f, dd=%f. " \
+                    % ( i, d0, dr, d1, dd ))
         
     return maskOcclusion, maskFOV, occupancyMap00, occupancyMap01
 
@@ -828,9 +879,9 @@ def process_single_thread(name, inputParams, args, poseIDs, poseData, indexList,
 
         # Show and save the resulting HSV image.
         if ( 1 == estimatedLoops ):
-            show(a, d, outDir, None, angleShift, flagShowFigure=flagShowFigure)
+            show(a, d, None, outDir, poseID_0, None, angleShift, flagShowFigure=flagShowFigure)
         else:
-            show(a, d, outDir, (int)(inputParams["imageWaitTimeMS"]), mf, angleShift, flagShowFigure=flagShowFigure)
+            show(a, d, None, outDir, poseID_0, (int)(inputParams["imageWaitTimeMS"]), mf, angleShift, flagShowFigure=flagShowFigure)
 
         count += 1
 
