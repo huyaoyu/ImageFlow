@@ -1304,10 +1304,10 @@ if __name__ == "__main__":
             p.join(timeout=1)
 
         if ( p.is_alive() ):
-            print("Main: %d subprocess (pid %d) join timeout. Try to terminate")
+            print("Main: %d subprocess (pid %d) join timeout. Try to terminate" % (i, p.pid))
             p.terminate()
         else:
-            print("Main: %d subprocess (pid %d) joined.", i, p.pid)
+            print("Main: %d subprocess (pid %d) joined." % (i, p.pid))
 
     print("Main: All processes joined.")
 
