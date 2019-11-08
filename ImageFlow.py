@@ -22,6 +22,8 @@ from GeneratePoseName import DummyArgs, generate_pose_name_json
 
 # Global variables used as constants.
 
+NP_FLOAT=np.float64
+
 INPUT_JSON = "./IFInput.json"
 
 ply_header = '''ply
@@ -45,8 +47,8 @@ PLY_COLORS = [\
 
 PLY_COLOR_LEVELS = 20
 
-WORLD_ORIGIN  = np.zeros((3, 1))
-CAMERA_ORIGIN = np.zeros((3, 1))
+WORLD_ORIGIN  = np.zeros((3, 1), dtype=NP_FLOAT)
+CAMERA_ORIGIN = np.zeros((3, 1), dtype=NP_FLOAT)
 
 SELF_OCC  = 2
 CROSS_OCC = 1
@@ -75,7 +77,7 @@ def depth_to_color(depth, limit = None):
     if ( limit is not None ):
         d[ d>limit ] = limit
 
-    color = np.zeros((depth.shape[0], depth.shape[1], 3), dtype = float)
+    color = np.zeros((depth.shape[0], depth.shape[1], 3), dtype=NP_FLOAT)
     color[:, :, 0] = d
     color[:, :, 1] = d
     color[:, :, 2] = d
@@ -90,7 +92,7 @@ def output_to_ply(fn, X, imageSize, rLimit, origin):
     if ( X.max() <= X.min() ):
         raise Exception("X.max() = %f, X.min() = %f." % ( X.max(), X.min() ) )
     
-    vertices = np.zeros(( imageSize[0], imageSize[1], 3 ), dtype = np.float)
+    vertices = np.zeros(( imageSize[0], imageSize[1], 3 ), dtype = NP_FLOAT)
     vertices[:, :, 0] = X[0, :].reshape(imageSize)
     vertices[:, :, 1] = X[1, :].reshape(imageSize)
     vertices[:, :, 2] = X[2, :].reshape(imageSize)
@@ -177,7 +179,7 @@ def from_quaternion_to_rotation_matrix(q):
         [ ss * (qki - qrj), ss * (qjk + qri), 1.0 - ss * (qi2 + qj2) ],\
     ]
 
-    R = np.array(R, dtype = np.float)
+    R = np.array(R, dtype = NP_FLOAT)
 
     return R
 
@@ -201,8 +203,8 @@ def get_pose_by_ID(ID, poseIDs, poseData):
     return get_pose_from_line( poseData[idxPose, :] )
 
 def du_dv(nu, nv, imageSize):
-    wIdx = np.linspace( 0, imageSize[1] - 1, imageSize[1] )
-    hIdx = np.linspace( 0, imageSize[0] - 1, imageSize[0] )
+    wIdx = np.linspace( 0, imageSize[1] - 1, imageSize[1], dtype=np.int )
+    hIdx = np.linspace( 0, imageSize[0] - 1, imageSize[0], dtype=np.int )
 
     u, v = np.meshgrid(wIdx, hIdx)
 
@@ -222,7 +224,7 @@ def show(ang, mag, mask=None, outDir=None, outName="bgr", waitTime=None, magFact
 
     if ( mask is not None ):
         mask = mask != 255
-        bgr[mask] = np.array([0, 0 ,0])
+        bgr[mask] = np.array([0, 0 ,0], dtype=np.uint8)
 
     if ( outDir is not None ):
         cv2.imwrite(outDir + "/%s_vis.png" % (outName), bgr, [cv2.IMWRITE_PNG_COMPRESSION, 0])
@@ -267,18 +269,18 @@ class CameraBase(object):
         self.pu = self.imageSize[1] / 2
         self.pv = self.imageSize[0] / 2
 
-        self.cameraMatrix = np.eye(3, dtype = np.float)
+        self.cameraMatrix = np.eye(3, dtype = NP_FLOAT)
         self.cameraMatrix[0, 0] = self.focal
         self.cameraMatrix[1, 1] = self.focal
         self.cameraMatrix[0, 2] = self.pu
         self.cameraMatrix[1, 2] = self.pv
 
-        self.worldR = np.zeros((3,3), dtype = np.float)
+        self.worldR = np.zeros((3,3), dtype = NP_FLOAT)
         self.worldR[0, 1] = 1.0
         self.worldR[1, 2] = 1.0
         self.worldR[2, 0] = 1.0
 
-        self.worldRI = np.zeros((3,3), dtype = np.float)
+        self.worldRI = np.zeros((3,3), dtype = NP_FLOAT)
         self.worldRI[0, 2] = 1.0
         self.worldRI[1, 0] = 1.0
         self.worldRI[2, 1] = 1.0
@@ -296,18 +298,18 @@ class CameraBase(object):
         return x[0:2, :]
 
     def from_depth_to_x_y(self, depth):
-        wIdx = np.linspace( 0, self.imageSize[1] - 1, self.imageSize[1] )
-        hIdx = np.linspace( 0, self.imageSize[0] - 1, self.imageSize[0] )
+        wIdx = np.linspace( 0, self.imageSize[1] - 1, self.imageSize[1], dtype=np.int )
+        hIdx = np.linspace( 0, self.imageSize[0] - 1, self.imageSize[0], dtype=np.int )
 
         u, v = np.meshgrid(wIdx, hIdx)
 
-        u = u.astype(np.float)
-        v = v.astype(np.float)
+        u = u.astype(NP_FLOAT)
+        v = v.astype(NP_FLOAT)
         
         x = ( u - self.pu ) * depth / self.focal
         y = ( v - self.pv ) * depth / self.focal
 
-        coor = np.zeros((3, self.size), dtype = np.float)
+        coor = np.zeros((3, self.size), dtype = NP_FLOAT)
         coor[0, :] = x.reshape((1, -1))
         coor[1, :] = y.reshape((1, -1))
         coor[2, :] = depth.reshape((1, -1))
@@ -342,7 +344,7 @@ def get_center_and_neighbors(h, w, i, j):
 
     return idx
 
-def get_distance_from_coordinate_table(tab, h, w, i, j):
+def get_distance_from_coordinate_table(tab, h, w, i, j, showDetail=False):
     """
     tab: A 3-row table contains 3D coordinates.
     h, w: The height and width of the original image.
@@ -359,13 +361,21 @@ def get_distance_from_coordinate_table(tab, h, w, i, j):
     y = tab[1, idx]
     z = tab[2, idx]
 
-    dist = np.sqrt( x**2 + y**2 + z**2 )
+    c = np.sqrt( x[0]**2 + y[0]**2 + z[0]**2 )
+    relativeDist = np.sqrt( (x-x[0])**2 + (y-y[0])**2 + (z-z[0])**2 )
 
-    c = dist[0]
+    ddMin = relativeDist.min()
+    ddMax = relativeDist.max()
 
-    dd = np.absolute(dist[1:] - c).max()
+    if ( showDetail ):
+        print("idx = {}. ".format(idx))
+        print("x = {}. ".format(x))
+        print("y = {}. ".format(y))
+        print("z = {}. ".format(z))
+        print("c = {}. ".format(c))
+        print("relativeDist = {}. ".format(relativeDist))
 
-    return c, dd
+    return c, ddMin, ddMax
 
 def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
     """
@@ -423,8 +433,10 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
             # Stop the current loop.
             continue
 
+        showDetail = False
+
         # Get the current depth.
-        d0, dd = get_distance_from_coordinate_table(x01, h, w, iy, ix)
+        d0, ddMin, ddMax = get_distance_from_coordinate_table(x01, h, w, iy, ix, showDetail)
         dr = 0.0
 
         # Check if the new index is occupied.
@@ -435,7 +447,7 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
             opIndex = occupancyMap00[iv, iu]
 
             # Get the depth at the registered index.
-            dr, dd = get_distance_from_coordinate_table(x01, h, w, opIndex // w, opIndex % w)
+            dr, ddMin, ddMax = get_distance_from_coordinate_table(x01, h, w, opIndex // w, opIndex % w)
 
             if ( d0 < dr ):
                 # Current point is nearer to the camera.
@@ -455,12 +467,12 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
         occupancyMap00[ iv, iu ] = i
 
         # Get the depth at x=iu, y=iv in the second image observed in the second camera.
-        d1, dd = get_distance_from_coordinate_table(x1, h, w, iv, iu)
+        d1, ddMin, ddMax = get_distance_from_coordinate_table(x1, h, w, iv, iu, showDetail)
 
         if ( d0 > D and d1 > D ):
             # Points at infinity do not occlude each other.
             pass
-        elif ( d0 <= d1 or d0 - d1 <= dd ):
+        elif ( d0 <= d1 or d0 - d1 <= ddMax ):
             # Current point is nearer to the camera or equals the distance of the corresponding pixel in the second image.
             # This is subject to the value of p. p is not check constantly.
             pass
@@ -469,25 +481,17 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
             # Update the occlusion mask.
             maskOcclusion[ iy, ix ] = CROSS_OCC
 
-            if ( 358 == iu and 220 == iv ):
-                print("Current pixel %d, d0=%f, dr=%f, d1=%f, dd=%f. " \
-                        % ( i, d0, dr, d1, dd ))
-
             if ( -1 != occupancyMap01[iv, iu] ):
                 # if ( occupancyMap01[iv, iu] == opIndex ):
                 #     continue
 
-                raise Exception( "Current pixel %d, wins pre-registered %d but occlued by second image at x=%d, y=%d (occupancyMap01: %d) with d0=%f, dr=%f, d1=%f, dd=%f. " \
-                    % ( i, opIndex, iu, iv, occupancyMap01[iv, iu], d0, dr, d1, dd ) )
+                raise Exception( "Current pixel %d, wins pre-registered %d but occlued by second image at x=%d, y=%d (occupancyMap01: %d) with d0=%f, dr=%f, d1=%f, ddMin=%f, ddMax=%f. " \
+                    % ( i, opIndex, iu, iv, occupancyMap01[iv, iu], d0, dr, d1, ddMin, ddMax ) )
 
             continue
 
         # Update the occupancy map.
         occupancyMap01[ iv, iu ] = i
-
-        if ( 358 == iu and 220 == iv ):
-            print("Current pixel %d, d0=%f, dr=%f, d1=%f, dd=%f. " \
-                    % ( i, d0, dr, d1, dd ))
         
     return maskOcclusion, maskFOV, occupancyMap00, occupancyMap01
 
@@ -515,8 +519,8 @@ def warp_error_by_index( img0, img1, u, v, idx0 ):
     diff = np.sqrt( np.linalg.norm( diff, 2, axis=1 ) )
 
     # Make diff to be an image.
-    dImg0 = np.zeros( h*w, dtype=np.float32 )
-    dImg1 = np.zeros( h*w, dtype=np.float32 )
+    dImg0 = np.zeros( h*w, dtype=NP_FLOAT )
+    dImg1 = np.zeros( h*w, dtype=NP_FLOAT )
     dImg0[idx0] = diff
     dImg1[idx1] = diff
 
@@ -569,7 +573,7 @@ def warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v):
          = evaluate_warp_error( cam0_img, cam1_img, X_01C, X1C, u, v )
 
     # Warp the image.
-    warppedImg = np.zeros_like(cam0_img)
+    warppedImg = np.zeros_like(cam0_img, dtype=np.uint8)
     
     validWarpMask = occupancyMask_00
     validWarpIdx  = occupancyMap_00[validWarpMask]
@@ -623,9 +627,9 @@ def load_pose_id_pose_data(params, args):
     poseDataFn = dataDir + "/" + params["poseData"]
     
     if ( ".txt" == os.path.splitext( os.path.split(poseDataFn)[1] )[1] ):
-        poseData = np.loadtxt( poseDataFn, dtype=np.float32 )
+        poseData = np.loadtxt( poseDataFn, dtype=NP_FLOAT )
     else:
-        poseData = np.load( poseDataFn )
+        poseData = np.load( poseDataFn ).astype(NP_FLOAT)
 
         if ( True == args.debug ):
             np.savetxt( dataDir + "/poseData.dat", poseData, fmt="%+.4e" )
@@ -651,7 +655,7 @@ def calculate_angle_distance_from_du_dv(du, dv, flagDegree=False):
     return a, d, angleShift
 
 def make_angle_distance(cam, a, d):
-    angleAndDist = np.zeros( ( cam.imageSize[0], cam.imageSize[1], 2), dtype = np.float32 )
+    angleAndDist = np.zeros( ( cam.imageSize[0], cam.imageSize[1], 2), dtype = NP_FLOAT )
     angleAndDist[:, :, 0] = a
     angleAndDist[:, :, 1] = d
 
@@ -766,7 +770,7 @@ def process_single_thread(name, inputParams, args, poseIDs, poseData, indexList,
             print("R = \n{}".format(R))
 
         # Load the depth of the first image.
-        depth_0 = np.load( depthDir + "/" + poseID_0 + depthTail )
+        depth_0 = np.load( depthDir + "/" + poseID_0 + depthTail ).astype(NP_FLOAT)
         
         if ( True == args.debug ):
             np.savetxt( outDir + "/depth_0.dat", depth_0, fmt="%.2e")
@@ -777,7 +781,7 @@ def process_single_thread(name, inputParams, args, poseIDs, poseData, indexList,
         
         if ( True == args.debug ):
             try:
-                output_to_ply(outDir + '/XInCam_0.ply', X0, cam_0.imageSize, distanceRange, CAMERA_ORIGIN)
+                output_to_ply(outDir + '/XInCam_0.ply', X0C, cam_0.imageSize, distanceRange, CAMERA_ORIGIN)
             except Exception as e:
                 print("Cannot write PLY file for X0. Exception: ")
                 print(e)
@@ -793,7 +797,7 @@ def process_single_thread(name, inputParams, args, poseIDs, poseData, indexList,
                 print(e)
 
         # Load the depth of the second image.
-        depth_1 = np.load( depthDir + "/" + poseID_1 + depthTail )
+        depth_1 = np.load( depthDir + "/" + poseID_1 + depthTail ).astype(NP_FLOAT)
 
         if ( True == args.debug ):
             np.savetxt( outDir + "/depth_1.dat", depth_1, fmt="%.2e")
@@ -804,7 +808,7 @@ def process_single_thread(name, inputParams, args, poseIDs, poseData, indexList,
 
         if ( True == args.debug ):
             try:
-                output_to_ply(outDir + "/XInCam_1.ply", X1, cam_1.imageSize, distanceRange, CAMERA_ORIGIN)
+                output_to_ply(outDir + "/XInCam_1.ply", X1C, cam_1.imageSize, distanceRange, CAMERA_ORIGIN)
             except Exception as e:
                 print("Cannot write PLY file for X1. Exception: ")
                 print(e)
@@ -823,16 +827,16 @@ def process_single_thread(name, inputParams, args, poseIDs, poseData, indexList,
         # The coordinate of the pixels of the first camera projected in the second camera's frame (NED).
         X_01 = R1.dot(XWorld_0) + t1
 
-        if ( True == args.debug ):
-            try:
-                output_to_ply(outDir + '/X_01.ply', X_01, cam_0.imageSize, distanceRange, CAMERA_ORIGIN)
-            except Exception as e:
-                print("Cannot write PLY file for X_01. Exception: ")
-                print(e)
-
         # The image coordinates in the second camera.
         X_01C = cam_0.worldR.dot(X_01)                  # Camera frame, z-axis pointing forwards.
         c     = cam_0.from_camera_frame_to_image(X_01C) # Image plane coordinates.
+
+        if ( True == args.debug ):
+            try:
+                output_to_ply(outDir + '/X_01C.ply', X_01C, cam_0.imageSize, distanceRange, CAMERA_ORIGIN)
+            except Exception as e:
+                print("Cannot write PLY file for X_01. Exception: ")
+                print(e)
 
         # Get new u anv v
         u = c[0, :].reshape(cam_0.imageSize)
@@ -845,7 +849,7 @@ def process_single_thread(name, inputParams, args, poseIDs, poseData, indexList,
         np.savetxt(outDir + "/du.dat", du, fmt="%+.2e")
         np.savetxt(outDir + "/dv.dat", dv, fmt="%+.2e")
 
-        dudv = np.zeros( ( cam_0.imageSize[0], cam_0.imageSize[1], 2), dtype = np.float32 )
+        dudv = np.zeros( ( cam_0.imageSize[0], cam_0.imageSize[1], 2), dtype = NP_FLOAT )
         dudv[:, :, 0] = du
         dudv[:, :, 1] = dv
         np.save(outDir + "/dudv.npy", dudv)
@@ -958,7 +962,7 @@ def save_flow(fnBase, flowSuffix, maskSuffix, du, dv, maskOcc, maskFOV):
     """
 
     # Create a 2-channel NumPy array.
-    flow = np.stack([du, dv], axis=-1).astype(np.float32)
+    flow = np.stack([du, dv], axis=-1).astype(NP_FLOAT)
 
     # Create a 1-channel NumPy array.
     mask = np.zeros_like(du, dtype=np.uint8) + 255
@@ -974,7 +978,7 @@ def save_flow(fnBase, flowSuffix, maskSuffix, du, dv, maskOcc, maskFOV):
 
     tempMask = maskFOV == OUT_OF_FOV_NEGATIVE_Z
     mask[tempMask] = 0
-    flow[tempMask] = np.array([0.0, 0.0])
+    flow[tempMask] = np.array([0.0, 0.0], dtype=NP_FLOAT)
 
     # Save the files.
     np.save( "%s%s.npy" % (fnBase, flowSuffix), flow )
@@ -1019,7 +1023,7 @@ def process_single_process(name, outDir, \
     
     if ( flagDebug ):
         try:
-            output_to_ply(debugOutDir + '/XInCam_0.ply', X0, cam_0.imageSize, distanceRange, CAMERA_ORIGIN)
+            output_to_ply(debugOutDir + '/XInCam_0.ply', X0C, cam_0.imageSize, distanceRange, CAMERA_ORIGIN)
         except Exception as e:
             print("Cannot write PLY file for X0. Exception: ")
             print(e)
@@ -1040,7 +1044,7 @@ def process_single_process(name, outDir, \
 
     if ( flagDebug ):
         try:
-            output_to_ply(debugOutDir + "/XInCam_1.ply", X1, cam_1.imageSize, distanceRange, CAMERA_ORIGIN)
+            output_to_ply(debugOutDir + "/XInCam_1.ply", X1C, cam_1.imageSize, distanceRange, CAMERA_ORIGIN)
         except Exception as e:
             print("Cannot write PLY file for X1. Exception: ")
             print(e)
@@ -1059,16 +1063,16 @@ def process_single_process(name, outDir, \
     # The coordinate of the pixels of the first camera projected in the second camera's frame (NED).
     X_01 = R1.dot(XWorld_0) + t1
 
-    if ( flagDebug ):
-        try:
-            output_to_ply(debugOutDir + '/X_01.ply', X_01, cam_0.imageSize, distanceRange, CAMERA_ORIGIN)
-        except Exception as e:
-            print("Cannot write PLY file for X_01. Exception: ")
-            print(e)
-
     # The image coordinates in the second camera.
     X_01C = cam_0.worldR.dot(X_01)                  # Camera frame, z-axis pointing forwards.
     c     = cam_0.from_camera_frame_to_image(X_01C) # Image plane coordinates.
+
+    if ( flagDebug ):
+        try:
+            output_to_ply(debugOutDir + '/X_01C.ply', X_01C, cam_0.imageSize, distanceRange, CAMERA_ORIGIN)
+        except Exception as e:
+            print("Cannot write PLY file for X_01. Exception: ")
+            print(e)
 
     # Get new u anv v
     u = c[0, :].reshape(cam_0.imageSize)
@@ -1077,7 +1081,7 @@ def process_single_process(name, outDir, \
     # Get the du and dv.
     du, dv = du_dv(u, v, cam_0.imageSize)
 
-    dudv = np.zeros( ( cam_0.imageSize[0], cam_0.imageSize[1], 2), dtype = np.float32 )
+    dudv = np.zeros( ( cam_0.imageSize[0], cam_0.imageSize[1], 2), dtype = NP_FLOAT )
 
     # # Calculate the angle and distance.
     # a, d, angleShift = calculate_angle_distance_from_du_dv( du, dv, flagDegree )
@@ -1212,12 +1216,12 @@ def worker(name, jq, rq, lq, p, inputParams, args):
             poseDataLineList_0 = job["poseLineList_0"]
             poseDataLineList_1 = job["poseLineList_1"]
 
-            poseDataLine_0 = np.array( poseDataLineList_0 )
-            poseDataLine_1 = np.array( poseDataLineList_1 )
+            poseDataLine_0 = np.array( poseDataLineList_0, dtype=NP_FLOAT )
+            poseDataLine_1 = np.array( poseDataLineList_1, dtype=NP_FLOAT )
 
             # Load the depth.
-            depth_0 = np.load( depthDir + "/" + poseID_0 + depthTail )
-            depth_1 = np.load( depthDir + "/" + poseID_1 + depthTail )
+            depth_0 = np.load( depthDir + "/" + poseID_0 + depthTail ).astype(NP_FLOAT)
+            depth_1 = np.load( depthDir + "/" + poseID_1 + depthTail ).astype(NP_FLOAT)
 
             # If it is debugging.
             if ( args.debug ):
@@ -1252,13 +1256,13 @@ def worker(name, jq, rq, lq, p, inputParams, args):
 
 def reshape_idx_array(idxArray):
     N = idxArray.size
-    idxArray = idxArray.astype(np.int64)
+    idxArray = idxArray.astype(np.int)
 
     # Find the closest squre root.
     s = int(math.ceil(math.sqrt(N)))
 
     # Create a new index array.
-    idx2D = np.zeros( (s*s, ), dtype=np.int64 ) + N
+    idx2D = np.zeros( (s*s, ), dtype=np.int ) + N
     idx2D[:N] = idxArray
 
     # Reshape and transpose.
@@ -1360,7 +1364,7 @@ if __name__ == "__main__":
     if ( idxNumberRequest < len(idxList)-1 ):
         idxList = idxList[:idxNumberRequest+1]
 
-    idxArray = np.array(idxList)
+    idxArray = np.array(idxList, dtype=np.int)
 
     # Reshape the idxArray.
     idxArrayR = reshape_idx_array(idxArray)
