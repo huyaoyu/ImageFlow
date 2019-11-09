@@ -14,38 +14,18 @@ import numpy.linalg as LA
 import os
 import pandas
 import queue # python3.
-from threading import Thread
 import time
 
+from CommonType import NP_FLOAT
+
+from Camera import CameraBase
 from ColorMapping import color_map
-from GeneratePoseName import DummyArgs, generate_pose_name_json
+from SimpleGeometory import from_quaternion_to_rotation_matrix
+from SimplePLY import output_to_ply 
+import Utils
+import WorkDirectory as WD
 
 # Global variables used as constants.
-
-NP_FLOAT=np.float64
-
-INPUT_JSON = "./IFInput.json"
-
-ply_header = '''ply
-format ascii 1.0
-element vertex %(vert_num)d
-property float x
-property float y
-property float z
-property uchar red
-property uchar green
-property uchar blue
-end_header
-'''
-
-PLY_COLORS = [\
-    "#2980b9",\
-    "#27ae60",\
-    "#f39c12",\
-    "#c0392b",\
-    ]
-
-PLY_COLOR_LEVELS = 20
 
 WORLD_ORIGIN  = np.zeros((3, 1), dtype=NP_FLOAT)
 CAMERA_ORIGIN = np.zeros((3, 1), dtype=NP_FLOAT)
@@ -55,152 +35,6 @@ CROSS_OCC = 1
 
 OUT_OF_FOV_POSITIVE_Z = 11
 OUT_OF_FOV_NEGATIVE_Z = 12
-
-def show_delimiter(title = "", c = "=", n = 50, leading = "\n", ending = "\n"):
-    d = [c for i in range( int(n/2) )]
-    s = "".join(d) + " " + title + " " + "".join(d)
-
-    print("%s%s%s" % (leading, s, ending))
-
-def write_ply(fn, verts, colors):
-    verts  = verts.reshape(-1, 3)
-    colors = colors.reshape(-1, 3)
-    verts  = np.hstack([verts, colors])
-
-    with open(fn, 'wb') as f:
-        f.write((ply_header % dict(vert_num=len(verts))).encode('utf-8'))
-        np.savetxt(f, verts, fmt='%f %f %f %d %d %d ')
-
-def depth_to_color(depth, limit = None):
-
-    d  = copy.deepcopy(depth)
-    if ( limit is not None ):
-        d[ d>limit ] = limit
-
-    color = np.zeros((depth.shape[0], depth.shape[1], 3), dtype=NP_FLOAT)
-    color[:, :, 0] = d
-    color[:, :, 1] = d
-    color[:, :, 2] = d
-
-    color = ( color - d.min() ) / ( d.max() - d.min() ) * 255
-    color = color.astype(np.uint8)
-
-    return color
-
-def output_to_ply(fn, X, imageSize, rLimit, origin):
-    # Check the input X.
-    if ( X.max() <= X.min() ):
-        raise Exception("X.max() = %f, X.min() = %f." % ( X.max(), X.min() ) )
-    
-    vertices = np.zeros(( imageSize[0], imageSize[1], 3 ), dtype = NP_FLOAT)
-    vertices[:, :, 0] = X[0, :].reshape(imageSize)
-    vertices[:, :, 1] = X[1, :].reshape(imageSize)
-    vertices[:, :, 2] = X[2, :].reshape(imageSize)
-    
-    vertices = vertices.reshape((-1, 3))
-    rv = copy.deepcopy(vertices)
-    rv[:, 0] = vertices[:, 0] - origin[0, 0]
-    rv[:, 1] = vertices[:, 1] - origin[1, 0]
-    rv[:, 2] = vertices[:, 2] - origin[2, 0]
-
-    r = LA.norm(rv, axis=1).reshape((-1,1))
-    mask = r < rLimit
-    mask = mask.reshape(( mask.size ))
-    # import ipdb; ipdb.set_trace()
-    r = r[ mask ]
-
-    cr, cg, cb = color_map(r, PLY_COLORS, PLY_COLOR_LEVELS)
-
-    colors = np.zeros( (r.size, 3), dtype = np.uint8 )
-
-    colors[:, 0] = cr.reshape( cr.size )
-    colors[:, 1] = cg.reshape( cr.size )
-    colors[:, 2] = cb.reshape( cr.size )
-
-    write_ply(fn, vertices[mask, :], colors)
-
-def load_IDs(fn):
-    fp = open(fn, "r")
-
-    if ( fp is None ):
-        print("Could not open %s" % (fn))
-        return -1
-    
-    lines = fp.readlines()
-
-    fp.close()
-
-    IDs = []
-
-    for l in lines:
-        IDs.append( l[:-2] )
-
-    return 0, IDs
-
-def load_IDs_JSON(fn, poseName = None):
-    fp = open(fn, "r")
-
-    if ( fp is None ):
-        print("Could not open %s" % (fn))
-        return -1
-    
-    dict = json.load(fp)
-
-    fp.close()
-
-    if ( poseName is None ):
-        return 0, dict["ID"]
-    else:
-        return 0, dict[poseName]
-
-def from_quaternion_to_rotation_matrix(q):
-    """
-    q: A numpy vector, 4x1.
-    """
-
-    qi2 = q[0, 0]**2
-    qj2 = q[1, 0]**2
-    qk2 = q[2, 0]**2
-
-    qij = q[0, 0] * q[1, 0]
-    qjk = q[1, 0] * q[2, 0]
-    qki = q[2, 0] * q[0, 0]
-
-    qri = q[3, 0] * q[0, 0]
-    qrj = q[3, 0] * q[1, 0]
-    qrk = q[3, 0] * q[2, 0]
-
-    s = 1.0 / ( q[3, 0]**2 + qi2 + qj2 + qk2 )
-    ss = 2 * s
-
-    R = [\
-        [ 1.0 - ss * (qj2 + qk2), ss * (qij - qrk), ss * (qki + qrj) ],\
-        [ ss * (qij + qrk), 1.0 - ss * (qi2 + qk2), ss * (qjk - qri) ],\
-        [ ss * (qki - qrj), ss * (qjk + qri), 1.0 - ss * (qi2 + qj2) ],\
-    ]
-
-    R = np.array(R, dtype = NP_FLOAT)
-
-    return R
-
-def get_pose_from_line(poseDataLine):
-    """
-    poseDataLine is a 7-element NumPy array. The first 3 elements are 
-    the translations. The remaining 4 elements are the orientation 
-    represented as a quternion.
-    """
-
-    data = poseDataLine.reshape((-1, 1))
-    t = data[:3, 0].reshape((-1, 1))
-    q = data[3:, 0].reshape((-1, 1))
-    R = from_quaternion_to_rotation_matrix(q)
-
-    return R.transpose(), -R.transpose().dot(t), q
-
-def get_pose_by_ID(ID, poseIDs, poseData):
-    idxPose = poseIDs.index( ID )
-
-    return get_pose_from_line( poseData[idxPose, :] )
 
 def du_dv(nu, nv, imageSize):
     wIdx = np.linspace( 0, imageSize[1] - 1, imageSize[1], dtype=np.int )
@@ -236,87 +70,6 @@ def show(ang, mag, mask=None, outDir=None, outName="bgr", waitTime=None, magFact
             cv2.waitKey()
         else:
             cv2.waitKey( waitTime )
-
-def save_float_image(fn, img):
-    img = (img - img.min()) / ( img.max() - img.min() ) * 255
-
-    img = img.astype(np.uint8)
-
-    cv2.imwrite( fn, img )
-
-def estimate_loops(N, step):
-    """
-    N and step will be converted to integers.
-    step must less than N.
-    """
-
-    N = (int)( N )
-    step = (int)( step )
-
-    loops = N / step
-
-    if ( step * loops + 1 > N ):
-        loops -= 1
-
-    return loops
-
-class CameraBase(object):
-    def __init__(self, focal, imageSize):
-        self.focal = focal
-        self.imageSize = copy.deepcopy(imageSize) # List or tuple, (height, width)
-        self.size = self.imageSize[0] * self.imageSize[1]
-
-        self.pu = self.imageSize[1] / 2
-        self.pv = self.imageSize[0] / 2
-
-        self.cameraMatrix = np.eye(3, dtype = NP_FLOAT)
-        self.cameraMatrix[0, 0] = self.focal
-        self.cameraMatrix[1, 1] = self.focal
-        self.cameraMatrix[0, 2] = self.pu
-        self.cameraMatrix[1, 2] = self.pv
-
-        self.worldR = np.zeros((3,3), dtype = NP_FLOAT)
-        self.worldR[0, 1] = 1.0
-        self.worldR[1, 2] = 1.0
-        self.worldR[2, 0] = 1.0
-
-        self.worldRI = np.zeros((3,3), dtype = NP_FLOAT)
-        self.worldRI[0, 2] = 1.0
-        self.worldRI[1, 0] = 1.0
-        self.worldRI[2, 1] = 1.0
-
-    def from_camera_frame_to_image(self, coor):
-        """
-        coor: A numpy column vector, 3x1.
-        return: A numpy column vector, 2x1.
-        """
-        
-        # coor = self.worldR.dot(coor)
-        x = self.cameraMatrix.dot(coor)
-        x = x / x[2,:]
-
-        return x[0:2, :]
-
-    def from_depth_to_x_y(self, depth):
-        wIdx = np.linspace( 0, self.imageSize[1] - 1, self.imageSize[1], dtype=np.int )
-        hIdx = np.linspace( 0, self.imageSize[0] - 1, self.imageSize[0], dtype=np.int )
-
-        u, v = np.meshgrid(wIdx, hIdx)
-
-        u = u.astype(NP_FLOAT)
-        v = v.astype(NP_FLOAT)
-        
-        x = ( u - self.pu ) * depth / self.focal
-        y = ( v - self.pv ) * depth / self.focal
-
-        coor = np.zeros((3, self.size), dtype = NP_FLOAT)
-        coor[0, :] = x.reshape((1, -1))
-        coor[1, :] = y.reshape((1, -1))
-        coor[2, :] = depth.reshape((1, -1))
-
-        # coor = self.worldRI.dot(coor)
-
-        return coor
 
 def get_center_and_neighbors(h, w, i, j):
     c = i*w+j
@@ -596,18 +349,6 @@ def warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v):
 
     return maskOcc, maskFOV, warppedImg, dImg1_00, dImg1_01, occupancyMask_00, occupancyMask_01
 
-def read_input_parameters_from_json(fn):
-    fpJSON = open(fn, "r")
-    if ( fpJSON is None ):
-        print("%s could not be opened." % (fn))
-        # Handle the error.
-
-    inputParams = json.load(fpJSON)
-
-    fpJSON.close()
-
-    return inputParams
-
 def get_magnitude_factor_from_input_parameters(params, args):
     if ( args.mf < 0.0 ):
         mf = params["imageMagnitudeFactor"]
@@ -616,11 +357,6 @@ def get_magnitude_factor_from_input_parameters(params, args):
 
     return mf
 
-def create_pose_id_file(dataDir, imgDir, pattern, poseFileName):
-    # Create dummy args.
-    args = DummyArgs(dataDir, imgDir, pattern, out_file=poseFileName, silent=True)
-    generate_pose_name_json(args)
-
 def load_pose_id_pose_data(params, args):
     dataDir = params["dataDir"]
 
@@ -628,9 +364,9 @@ def load_pose_id_pose_data(params, args):
 
     if ( not os.path.isfile(poseIDsFn) ):
         # File not exist. Create on the fly.
-        create_pose_id_file( dataDir, params["imageDir"], "*%s" % (params["imageExt"]), params["poseFilename"] )
+        WD.create_pose_id_file( dataDir, params["imageDir"], "*%s" % (params["imageExt"]), params["poseFilename"] )
 
-    _, poseIDs = load_IDs_JSON(\
+    _, poseIDs = WD.load_IDs_JSON(\
         poseIDsFn, params["poseName"])
 
     poseDataFn = dataDir + "/" + params["poseData"]
@@ -644,10 +380,6 @@ def load_pose_id_pose_data(params, args):
             np.savetxt( dataDir + "/poseData.dat", poseData, fmt="%+.4e" )
 
     return poseIDs, poseData
-
-def test_dir(d):
-    if ( False == os.path.isdir(d) ):
-        os.makedirs(d)
 
 def calculate_angle_distance_from_du_dv(du, dv, flagDegree=False):
     a = np.arctan2( dv, du )
@@ -700,247 +432,6 @@ def print_max_warp_error(entry):
     else:
         raise Exception( "Wrong max warp error entry: idx: %d, poseIDs: %s - %s, mean error: %f. " % \
             ( entry["idx"], entry["poseID_0"], entry["poseID_1"], entry["warpErr"], entry["warpErr_01"] ) )
-
-def process_single_thread(name, inputParams, args, poseIDs, poseData, indexList, startII, endII, flagShowFigure=False):
-    # Data directory.
-    dataDir = inputParams["dataDir"]
-
-    # The magnitude factor.
-    mf = get_magnitude_factor_from_input_parameters( inputParams, args )
-
-    # Camera.
-    cam_0 = CameraBase(inputParams["camera"]["focal"], inputParams["camera"]["imageSize"])
-    # print(cam_0.imageSize)
-    # print(cam_0.cameraMatrix)
-
-    # We are assuming that the cameras at the two poses are the same camera.
-    cam_1 = cam_0
-
-    # Loop over the poses.
-    poseID_0, poseID_1 = None, None
-
-    outDirBase    = dataDir + "/" + inputParams["outDir"]
-    depthDir      = dataDir + "/" + inputParams["depthDir"]
-    imgDir        = dataDir + "/" + inputParams["imageDir"]
-    imgSuffix     = inputParams["imageSuffix"]
-    imgExt        = inputParams["imageExt"]
-    depthTail     = inputParams["depthSuffix"] + inputParams["depthExt"]
-    distanceRange = inputParams["distanceRange"]
-    flagDegree    = inputParams["flagDegree"]
-    warpErrThres  = inputParams["warpErrorThreshold"]
-
-    estimatedLoops = endII - startII + 1 - 1
-
-    count = 0
-
-    overWarpErrThresList = []
-    warpErrMaxEntry = { "idx": -1, "poseID_0": "N/A", "poseID_1": "N/A", "warpErr": 0.0, "warpErr_01": 0.0 }
-
-    for i in range( startII+1, endII+1 ):
-        # Show the delimiter.
-        show_delimiter( title = "%s: %d / %d" % ( name, count + 1, estimatedLoops ), leading="", ending="" )
-
-        idxPose0 = indexList[i - 1]
-        idxPose1 = indexList[i]
-
-        poseID_0 = poseIDs[ idxPose0 ]
-        poseID_1 = poseIDs[ idxPose1 ]
-
-        # print("poseID_0 = %s, poseID_1 = %s" % (poseID_0, poseID_1))
-
-        # Prepare output directory.
-        outDir = outDirBase + "/" + poseID_0
-        test_dir(outDir)
-
-        # Get the pose of the first position.
-        R0, t0, q0= get_pose_by_ID(poseID_0, poseIDs, poseData)
-        R0Inv = LA.inv(R0)
-
-        if ( True == args.debug ):
-            print("t0 = \n{}".format(t0))
-            print("q0 = \n{}".format(q0))
-            print("R0 = \n{}".format(R0))
-            print("R0Inv = \n{}".format(R0Inv))
-
-        # Get the pose of the second position.
-        R1, t1, q1 = get_pose_by_ID(poseID_1, poseIDs, poseData)
-        R1Inv = LA.inv(R1)
-
-        if ( True == args.debug ):
-            print("t1 = \n{}".format(t1))
-            print("q1 = \n{}".format(q1))
-            print("R1 = \n{}".format(R1))
-            print("R1Inv = \n{}".format(R1Inv))
-
-        # Compute the rotation between the two camera poses.
-        R = np.matmul( R1, R0Inv )
-
-        if ( True == args.debug ):
-            print("R = \n{}".format(R))
-
-        # Load the depth of the first image.
-        depth_0 = np.load( depthDir + "/" + poseID_0 + depthTail ).astype(NP_FLOAT)
-        
-        if ( True == args.debug ):
-            np.savetxt( outDir + "/depth_0.dat", depth_0, fmt="%.2e")
-
-        # Calculate the coordinates in the first camera's frame.
-        X0C = cam_0.from_depth_to_x_y(depth_0) # Coordinates in the camera frame. z-axis pointing forwards.
-        X0  = cam_0.worldRI.dot(X0C)           # Corrdinates in the NED frame. z-axis pointing downwards.
-        
-        if ( True == args.debug ):
-            try:
-                output_to_ply(outDir + '/XInCam_0.ply', X0C, cam_0.imageSize, distanceRange, CAMERA_ORIGIN)
-            except Exception as e:
-                print("Cannot write PLY file for X0. Exception: ")
-                print(e)
-
-        # The coordinates in the world frame.
-        XWorld_0  = R0Inv.dot(X0 - t0)
-
-        if ( True == args.debug ):
-            try:
-                output_to_ply(outDir + "/XInWorld_0.ply", XWorld_0, cam_1.imageSize, distanceRange, -R0Inv.dot(t0))
-            except Exception as e:
-                print("Cannot write PLY file for XWorld_0. Exception: ")
-                print(e)
-
-        # Load the depth of the second image.
-        depth_1 = np.load( depthDir + "/" + poseID_1 + depthTail ).astype(NP_FLOAT)
-
-        if ( True == args.debug ):
-            np.savetxt( outDir + "/depth_1.dat", depth_1, fmt="%.2e")
-
-        # Calculate the coordinates in the second camera's frame.
-        X1C = cam_1.from_depth_to_x_y(depth_1) # Coordinates in the camera frame. z-axis pointing forwards.
-        X1  = cam_1.worldRI.dot(X1C)           # Corrdinates in the NED frame. z-axis pointing downwards.
-
-        if ( True == args.debug ):
-            try:
-                output_to_ply(outDir + "/XInCam_1.ply", X1C, cam_1.imageSize, distanceRange, CAMERA_ORIGIN)
-            except Exception as e:
-                print("Cannot write PLY file for X1. Exception: ")
-                print(e)
-
-        # The coordiantes in the world frame.
-        XWorld_1 = R1Inv.dot( X1 - t1 )
-
-        if ( True == args.debug ):
-            try:
-                output_to_ply(outDir + "/XInWorld_1.ply", XWorld_1, cam_1.imageSize, distanceRange, -R1Inv.dot(t1))
-            except Exception as e:
-                print("Cannot write PLY file for XWorld_1. Exception: ")
-                print(e)
-
-        # ====================================
-        # The coordinate of the pixels of the first camera projected in the second camera's frame (NED).
-        X_01 = R1.dot(XWorld_0) + t1
-
-        # The image coordinates in the second camera.
-        X_01C = cam_0.worldR.dot(X_01)                  # Camera frame, z-axis pointing forwards.
-        c     = cam_0.from_camera_frame_to_image(X_01C) # Image plane coordinates.
-
-        if ( True == args.debug ):
-            try:
-                output_to_ply(outDir + '/X_01C.ply', X_01C, cam_0.imageSize, distanceRange, CAMERA_ORIGIN)
-            except Exception as e:
-                print("Cannot write PLY file for X_01. Exception: ")
-                print(e)
-
-        # Get new u anv v
-        u = c[0, :].reshape(cam_0.imageSize)
-        v = c[1, :].reshape(cam_0.imageSize)
-        np.savetxt(outDir + "/u.dat", u, fmt="%+.2e")
-        np.savetxt(outDir + "/v.dat", v, fmt="%+.2e")
-
-        # Get the du and dv.
-        du, dv = du_dv(u, v, cam_0.imageSize)
-        np.savetxt(outDir + "/du.dat", du, fmt="%+.2e")
-        np.savetxt(outDir + "/dv.dat", dv, fmt="%+.2e")
-
-        dudv = np.zeros( ( cam_0.imageSize[0], cam_0.imageSize[1], 2), dtype = NP_FLOAT )
-        dudv[:, :, 0] = du
-        dudv[:, :, 1] = dv
-        np.save(outDir + "/dudv.npy", dudv)
-
-        # Calculate the angle and distance.
-        a, d, angleShift = calculate_angle_distance_from_du_dv( du, dv, flagDegree )
-        np.savetxt(outDir + "/a.dat", a, fmt="%+.2e")
-        np.savetxt(outDir + "/d.dat", d, fmt="%+.2e")
-
-        angleAndDist = make_angle_distance(cam_0, a, d)
-        np.save(outDir + "/ad.npy", angleAndDist)
-
-        # warp the image to see the result
-        warppedImg, meanWarpError, meanWarpError_01 = warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v)
-
-        if ( meanWarpError > warpErrThres ):
-            # print("meanWarpError (%f) > warpErrThres (%f). " % ( meanWarpError, warpErrThres ))
-            overWarpErrThresList.append( { "idx": i, "poseID_0": poseID_0, "poseID_1": poseID_1, "meanWarpError": meanWarpError, "meanWarpError_01": meanWarpError_01 } )
-
-        if ( meanWarpError > warpErrMaxEntry["warpErr"] ):
-            warpErrMaxEntry["idx"] = i
-            warpErrMaxEntry["poseID_0"]   = poseID_0
-            warpErrMaxEntry["poseID_1"]   = poseID_1
-            warpErrMaxEntry["warpErr"]    = meanWarpError
-            warpErrMaxEntry["warpErr_01"] = meanWarpError_01
-
-        if ( True == flagShowFigure ):
-            cv2.imshow('img', warppedImg)
-            # The waitKey() will be executed in show() later.
-            # cv2.waitKey(0)
-
-        # Show and save the resulting HSV image.
-        if ( 1 == estimatedLoops ):
-            show(a, d, None, outDir, poseID_0, None, angleShift, flagShowFigure=flagShowFigure)
-        else:
-            show(a, d, None, outDir, poseID_0, (int)(inputParams["imageWaitTimeMS"]), mf, angleShift, flagShowFigure=flagShowFigure)
-
-        count += 1
-
-        # if ( count >= idxNumberRequest ):
-        #     print("Loop number hits the request number. Stop here.")
-        #     break
-
-    # show_delimiter("Summary.")
-    # print("%d poses, starting at idx = %d, step = %d, %d steps in total. idxNumberRequest = %d\n" % (nPoses, inputParams["startingIdx"], idxStep, count, idxNumberRequest))
-
-    # print_over_warp_error_list( overWarpErrThresList, warpErrThres )
-
-    # print_max_warp_error( warpErrMaxEntry )
-
-    # if ( args.mf >= 0 ):
-    #     print( "Command line argument --mf %f overwrites the parameter \"imageMagnitudeFactor\" (%f) in the input JSON file.\n" % (mf, inputParams["imageMagnitudeFactor"]) )
-
-    return overWarpErrThresList, warpErrMaxEntry
-
-class ImageFlowThread(Thread):
-    def __init__(self, name, inputParams, args, poseIDs, poseData, indexList, startII, endII, flagShowFigure=False):
-        super(ImageFlowThread, self).__init__()
-
-        self.setName( name )
-
-        self.name           = name
-        self.inputParams    = inputParams
-        self.args           = args
-        self.poseIDs        = poseIDs
-        self.poseData       = poseData
-        self.indexList      = indexList
-        self.startII        = startII
-        self.endII          = endII
-        self.flagShowFigure = flagShowFigure
-
-        self.overWarpErrThresList = None
-        self.warpErrMaxEntry      = None
-
-    def run(self):
-        self.overWarpErrThresList, self.warpErrMaxEntry = \
-            process_single_thread( \
-                self.name, 
-                self.inputParams, self.args, 
-                self.poseIDs, self.poseData, 
-                self.indexList, self.startII, self.endII, 
-                flagShowFigure=self.flagShowFigure )
 
 def save_flow(fnBase, flowSuffix, maskSuffix, du, dv, maskOcc, maskFOV):
     """
@@ -1001,7 +492,7 @@ def process_single_process(name, outDir, \
     flagShowFigure=False, flagDebug=False, debugOutDir="./"):
     
     # Get the pose of the first position.
-    R0, t0, q0 = get_pose_from_line(poseDataLine_0)
+    R0, t0, q0 = WD.get_pose_from_line(poseDataLine_0)
     R0Inv = LA.inv(R0)
 
     if ( flagDebug ):
@@ -1011,7 +502,7 @@ def process_single_process(name, outDir, \
         print("R0Inv = \n{}".format(R0Inv))
 
     # Get the pose of the second position.
-    R1, t1, q1 = get_pose_from_line(poseDataLine_1)
+    R1, t1, q1 = WD.get_pose_from_line(poseDataLine_1)
     R1Inv = LA.inv(R1)
 
     if ( flagDebug ):
@@ -1114,7 +605,7 @@ def process_single_process(name, outDir, \
         warpErrImgFn = "%s/%s_%s%s%s%s" % ( errorExtraDir, poseID_0, poseID_1, imgSuffix, "_error_00", imgExt )
         
         # Save the error image.
-        save_float_image( warpErrImgFn, dImg1_00 )
+        Utils.save_float_image( warpErrImgFn, dImg1_00 )
 
         # Save the warpped image.
         cam0WrpFn = "%s/%s_%s%s%s%s" % ( errorExtraDir, poseID_0, poseID_1, imgSuffix, "_warp", imgExt )
@@ -1235,7 +726,7 @@ def worker(name, jq, rq, lq, p, inputParams, args):
             # If it is debugging.
             if ( args.debug ):
                 debugOutDir = "%s/ImageFlow/%s" % ( dataDir, poseID_0 )
-                test_dir(debugOutDir)
+                Utils.test_dir(debugOutDir)
             else:
                 debugOutDir = "./"
 
@@ -1328,9 +819,7 @@ def save_report(fn, report):
     # Save the file.
     df.to_csv(fn, index=False)
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Compute the image flow data from sequence of camera poses and their depth information.')
-
+def handle_script_args(parser):
     parser.add_argument("input", type=str, \
         help = "The filename of the input JSON file.")
 
@@ -1351,8 +840,15 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    return args
+
+if __name__ == "__main__":
+    # Script input arguments.
+    parser = argparse.ArgumentParser(description='Compute the image flow data from sequence of camera poses and their depth information.')
+    args   = handle_script_args(parser)
+
     # Read the JSON input file.
-    inputParams = read_input_parameters_from_json( args.input )
+    inputParams = WD.read_input_parameters_from_json( args.input )
 
     # Check if use degree as the unit of angle
     flagDegree = inputParams["flagDegree"]
@@ -1380,12 +876,12 @@ if __name__ == "__main__":
 
     # Test the output directory.
     outDir = inputParams["dataDir"] + "/" + inputParams["outDir"]
-    test_dir(outDir)
+    Utils.test_dir(outDir)
 
     # Check if we are saving the extra error evaluations.
     if ( args.save_error_extra ):
         errExDir = "%s%s" % ( outDir, args.error_extra_dir_suffix )
-        test_dir(errExDir)
+        Utils.test_dir(errExDir)
     else:
         errExDir = None
 
@@ -1468,7 +964,7 @@ if __name__ == "__main__":
 
     endTime = time.time()
 
-    show_delimiter("Summary.")
+    Utils.show_delimiter("Summary.")
     loggerQueue.put("%d poses, starting at idx = %d, step = %d, %d steps in total. idxNumberRequest = %d. Total time %ds. \n" % \
         (nPoses, inputParams["startingIdx"], idxStep, len( idxList )-1, idxNumberRequest, endTime-startTime))
 
