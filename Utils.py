@@ -22,12 +22,31 @@ def test_dir(d):
     if ( False == os.path.isdir(d) ):
         os.makedirs(d)
 
+def normalize_float_image(img, top=255):
+    if ( top <= 0):
+        raise Exception("Top should be positvie. top = {}. ".format(top))
+
+    img = (img - img.min()) / ( img.max() - img.min() ) * top
+
+    return img
+
 def save_float_image(fn, img):
-    img = (img - img.min()) / ( img.max() - img.min() ) * 255
+    img = normalize_float_image(img, 255)
 
     img = img.astype(np.uint8)
 
     cv2.imwrite( fn, img )
+
+    return img
+
+def save_float_image_PNG(fn, img):
+    img = normalize_float_image(img, 255)
+
+    img = img.astype(np.uint8)
+
+    cv2.imwrite( fn, img, [ cv2.IMWRITE_PNG_COMPRESSION, 0 ] )
+
+    return img
 
 def estimate_loops(N, step):
     """

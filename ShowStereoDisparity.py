@@ -1,24 +1,23 @@
 from __future__ import print_function
 
 import argparse
+import cv2
 import numpy as np
 import os
 
-from ImageFlow import show, calculate_angle_distance_from_du_dv
-from ImageFlow import SELF_OCC, CROSS_OCC, OUT_OF_FOV_POSITIVE_Z
-from Utils import test_dir
+from CommonType import NP_FLOAT
+
+from ImageStereo import STEREO_OUT_OF_FOV, STEREO_SELF_OCC, STEREO_CROSS_OCC
+from Utils import test_dir, normalize_float_image, save_float_image_PNG
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Visualize an optical flow.')
+    parser = argparse.ArgumentParser(description='Visualize an disparity.')
 
-    parser.add_argument("flow", type=str, \
-        help="The filename of the flow.")
+    parser.add_argument("disp", type=str, \
+        help="The filename of the disparity.")
 
     parser.add_argument("--mask", type=str, default="", \
         help="The filename of the mask")
-    
-    parser.add_argument("--mf", type=float, default=1.0, \
-        help="The amplification factor.")
     
     parser.add_argument("--ignore-fov-mask", action="store_true", default=False, \
         help="Ignore the out-of-FOV mask label.")
@@ -37,13 +36,13 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Open the flow file.
-    flow = np.load(args.flow)
+    # Open the disparity file.
+    disp = np.load(args.disp).astype(NP_FLOAT)
 
     # Open the mask file.
     if ( "" == args.mask ):
         # No mask file specified.
-        mask = np.zeros(flow.shape[:2], dtype=np.uint8) + 255
+        mask = np.zeros(disp.shape, dtype=np.uint8) + 255
     else:
         mask = np.load(args.mask)
 
@@ -51,39 +50,49 @@ if __name__ == "__main__":
 
     # Masking.
     if ( args.ignore_fov_mask ):
-        tempMask = mask == OUT_OF_FOV_POSITIVE_Z
+        tempMask = mask == STEREO_OUT_OF_FOV
         mask[tempMask] = 255
         suffix += "_nf"
 
     if ( args.ignore_all_occ_mask ):
-        tempMask = mask == CROSS_OCC
+        tempMask = mask == STEREO_CROSS_OCC
         mask[tempMask] = 255
-        tempMask = mask == SELF_OCC
+        tempMask = mask == STEREO_SELF_OCC
         mask[tempMask] = 255
         suffix += "_nc_ns"
     else:
         if ( args.ignore_cross_occ_mask ):
-            tempMask = mask == CROSS_OCC
+            tempMask = mask == STEREO_CROSS_OCC
             mask[tempMask] = 255
             suffix += "_nc"
 
         if ( args.ignore_self_occ_mask ):
-            tempMask = mask == SELF_OCC
+            tempMask = mask == STEREO_SELF_OCC
             mask[tempMask] = 255
             suffix += "_ns"
-    
-    # Calculate the angle and distance.
-    a, d, angleShift = calculate_angle_distance_from_du_dv( flow[:, :, 0], flow[:, :, 1], flagDegree=True )
 
     if ( "" != args.write_dir ):
         test_dir( args.write_dir )
         outDir  = args.write_dir
-        outName = "%s" % ( os.path.splitext( os.path.split( args.flow )[1] )[0] )
+        outName = "%s" % ( os.path.splitext( os.path.split( args.disp )[1] )[0] )
     else:
         outDir  = None
         outName = ""
 
     outName += suffix
 
+    tempMask = mask != 255
+    disp[tempMask] = 0.0
+
+    outFn = "%s/%s.png" % ( outDir, outName )
+
+    # Save the image.
+    if ( "" != args.write_dir ):
+        save_float_image_PNG( outFn, disp )
+
     # Show the image.
-    show(a, d, mask, outDir, outName, waitTime=None, magFactor=args.mf, angShift=angleShift)
+    dispN = normalize_float_image( disp, 255 ).astype(np.uint8)
+
+    cv2.imshow(outName, dispN)
+    cv2.waitKey()
+    

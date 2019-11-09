@@ -19,8 +19,6 @@ import time
 from CommonType import NP_FLOAT
 
 from Camera import CameraBase
-from ColorMapping import color_map
-from SimpleGeometory import from_quaternion_to_rotation_matrix
 from SimplePLY import output_to_ply 
 import Utils
 import WorkDirectory as WD
@@ -540,19 +538,19 @@ def process_single_process(name, outDir, \
 
     # Calculate the coordinates in the second camera's frame.
     X1C = cam_1.from_depth_to_x_y(depth_1) # Coordinates in the camera frame. z-axis pointing forwards.
-    X1  = cam_1.worldRI.dot(X1C)           # Corrdinates in the NED frame. z-axis pointing downwards.
 
     if ( flagDebug ):
+        X1  = cam_1.worldRI.dot(X1C)           # Corrdinates in the NED frame. z-axis pointing downwards.
+
         try:
             output_to_ply(debugOutDir + "/XInCam_1.ply", X1C, cam_1.imageSize, distanceRange, CAMERA_ORIGIN)
         except Exception as e:
             print("Cannot write PLY file for X1. Exception: ")
             print(e)
 
-    # The coordiantes in the world frame.
-    XWorld_1 = R1Inv.dot( X1 - t1 )
+        # The coordiantes in the world frame.
+        XWorld_1 = R1Inv.dot( X1 - t1 )
 
-    if ( flagDebug ):
         try:
             output_to_ply(debugOutDir + "/XInWorld_1.ply", XWorld_1, cam_1.imageSize, distanceRange, -R1Inv.dot(t1))
         except Exception as e:
