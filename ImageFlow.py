@@ -34,6 +34,26 @@ CROSS_OCC = 1
 OUT_OF_FOV_POSITIVE_Z = 11
 OUT_OF_FOV_NEGATIVE_Z = 12
 
+def compose_m(R, t):
+    m = np.zeros((4, 4), dtype=NP_FLOAT)
+    m[0:3, 0:3] = R
+    m[0:3, 3]   = t.reshape((-1,))
+    m[3,3]      = 1.0
+
+    return m
+
+def inv_m(m):
+    im = np.zeros_like(m, dtype=NP_FLOAT)
+
+    R = m[0:3, 0:3]
+    t = m[0:3, 3].reshape((3, 1))
+
+    im[0:3, 0:3] = R.transpose()
+    im[0:3, 3]   = -R.transpose().dot( t ).reshape((-1,))
+    im[3, 3]     = 1.0
+
+    return im
+
 def du_dv(nu, nv, imageSize):
     wIdx = np.linspace( 0, imageSize[1] - 1, imageSize[1], dtype=np.int )
     hIdx = np.linspace( 0, imageSize[0] - 1, imageSize[0], dtype=np.int )
@@ -126,9 +146,9 @@ def get_distance_from_coordinate_table(tab, h, w, i, j, showDetail=False):
         print("c = {}. ".format(c))
         print("relativeDist = {}. ".format(relativeDist))
 
-    return c, ddMin, ddMax
+    return c, ddMin, ddMax, ( x[0], y[0], z[0] )
 
-def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
+def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, p=0.001, D=1000):
     """
     imageSize: height x width.
     x01: The 3D coordinates of the pixels in the first image observed in the frame of the second camera. 3-row 2D array.
@@ -144,6 +164,12 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
     assert( u.shape[1] == v.shape[1] )
     assert( u.shape[0] * u.shape[1] == x01.shape[1] )
     assert( x01.shape[0] == 3 )
+
+    # Geometory.
+    H = M0.dot( inv_m(M1) )
+    h20 = H[2, 0] / cam_1.focal
+    h21 = H[2, 1] / cam_1.focal
+    ah22 = np.absolute( H[2,2] )
 
     # Allocate memory.
     occupancyMap00 = np.zeros( imageSize, dtype=np.int32 ) - 1
@@ -189,7 +215,7 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
         #     showDetail = True
 
         # Get the current depth.
-        d0, ddMin, ddMax = get_distance_from_coordinate_table(x01, h, w, iy, ix, showDetail)
+        d0, ddMin, ddMax, _ = get_distance_from_coordinate_table(x01, h, w, iy, ix, showDetail)
         dr = 0.0
 
         # Check if the new index is occupied.
@@ -200,7 +226,7 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
             opIndex = occupancyMap00[iv, iu]
 
             # Get the depth at the registered index.
-            dr, ddMin, ddMax = get_distance_from_coordinate_table(x01, h, w, opIndex // w, opIndex % w)
+            dr, ddMin, ddMax, _ = get_distance_from_coordinate_table(x01, h, w, opIndex // w, opIndex % w)
 
             if ( d0 < dr ):
                 # Current point is nearer to the camera.
@@ -222,14 +248,17 @@ def create_warp_masks(imageSize, x01, x1, u, v, p=0.001, D=1000):
         occupancyMap00[ iv, iu ] = i
 
         # Get the depth at x=iu, y=iv in the second image observed in the second camera.
-        d1, ddMin, ddMax = get_distance_from_coordinate_table(x1, h, w, iv, iu, showDetail)
+        d1, ddMin, ddMax, coor = get_distance_from_coordinate_table(x1, h, w, iv, iu, showDetail)
+
+        ddxy = max( np.absolute( h20*coor[2] ), np.absolute( h21*coor[2] ), ah22 )
+
         if (showDetail):
             print("d0 = %f, dr = %f, d1 = %f, ddMin = %f, ddMax = %f. " % ( d0, dr, d1, ddMin, ddMax ))
 
         if ( d0 > D and d1 > D ):
             # Points at infinity do not occlude each other.
             pass
-        elif ( d0 <= d1 or d0 - d1 <= ddMax ):
+        elif ( d0 <= d1 or d0 - d1 <= ddxy ):
             # Current point is nearer to the camera or equals the distance of the corresponding pixel in the second image.
             # This is subject to the value of p. p is not check constantly.
             pass
@@ -286,7 +315,7 @@ def warp_error_by_index( img0, img1, u, v, idx0 ):
 
     return dImg0.reshape( (h, w) ), dImg1.reshape( (h, w) )
 
-def evaluate_warp_error( img0, img1, x01, x1, u, v ):
+def evaluate_warp_error( img0, img1, x01, x1, u, v, cam_0, cam_1, M0, M1 ):
     """
     x01: The 3D coordinates of the pixels in the first image observed in the frame of the second camera. 3-row 2D array.
     x1: The 3D coordinates of the pixels in the second image observed in the frame of the second camera. 3-row 2D array.
@@ -298,7 +327,7 @@ def evaluate_warp_error( img0, img1, x01, x1, u, v ):
     w = img0.shape[1]
 
     # Get the masks.
-    maskOcclusion, maskFOV, occupancyMap00, occupancyMap01 = create_warp_masks( img0.shape[:2], x01, x1, u, v )
+    maskOcclusion, maskFOV, occupancyMap00, occupancyMap01 = create_warp_masks( img0.shape[:2], x01, x1, u, v, cam_0, cam_1, M0, M1 )
 
     # Make a mask for the occupancyMap00
     mask00 = occupancyMap00 != -1 
@@ -317,7 +346,8 @@ def evaluate_warp_error( img0, img1, x01, x1, u, v ):
     return dImg0_00, dImg1_00, occupancyMap00, mask00, \
            dImg0_01, dImg1_01, occupancyMap01, mask01, maskOcclusion, maskFOV
 
-def warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v):
+def warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v, \
+        cam_0, cam_1, M0, M1):
     cam0ImgFn = "%s/%s%s%s" % ( imgDir, poseID_0, imgSuffix, imgExt )
     cam1ImgFn = "%s/%s%s%s" % ( imgDir, poseID_1, imgSuffix, imgExt )
 
@@ -330,7 +360,7 @@ def warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v):
     dImg0_00, dImg1_00, occupancyMap_00, occupancyMask_00, \
     dImg0_01, dImg1_01, occupancyMap_01, occupancyMask_01, \
     maskOcc, maskFOV \
-         = evaluate_warp_error( cam0_img, cam1_img, X_01C, X1C, u, v )
+         = evaluate_warp_error( cam0_img, cam1_img, X_01C, X1C, u, v, cam_0, cam_1, M0, M1 )
 
     # Warp the image.
     warppedImg = np.zeros_like(cam0_img, dtype=np.uint8)
@@ -492,6 +522,7 @@ def process_single_process(name, outDir, \
     # Get the pose of the first position.
     R0, t0, q0 = WD.get_pose_from_line(poseDataLine_0)
     R0Inv = LA.inv(R0)
+    M0 = compose_m(R0, t0)
 
     if ( flagDebug ):
         print("t0 = \n{}".format(t0))
@@ -502,6 +533,7 @@ def process_single_process(name, outDir, \
     # Get the pose of the second position.
     R1, t1, q1 = WD.get_pose_from_line(poseDataLine_1)
     R1Inv = LA.inv(R1)
+    M1 = compose_m(R1, t1)
 
     if ( flagDebug ):
         print("t1 = \n{}".format(t1))
@@ -587,7 +619,8 @@ def process_single_process(name, outDir, \
 
     # warp the image to see the result
     maskOcc, maskFOV, warppedImg, dImg1_00, dImg1_01, occupancyMask_00, occupancyMask_01 \
-         = warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v)
+         = warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v, \
+             cam_0, cam_1, M0, M1)
 
     save_flow( "%s/%s" % (outDir, poseID_0), "_flow", "_mask", du, dv, maskOcc, maskFOV )
 
