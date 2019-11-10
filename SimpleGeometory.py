@@ -4,6 +4,11 @@ import numpy as np
 
 from CommonType import NP_FLOAT
 
+def distance_of_2_points(p0, p1):
+    d = p0.reshape((-1,)) - p1.reshape((-1,))
+
+    return np.linalg.norm( d, 2 )
+
 def from_quaternion_to_rotation_matrix(q):
     """
     q: A numpy vector, 4x1.

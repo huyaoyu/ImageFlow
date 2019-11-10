@@ -19,6 +19,7 @@ import time
 from CommonType import NP_FLOAT
 
 from Camera import CameraBase
+from SimpleGeometory import distance_of_2_points
 from SimplePLY import output_to_ply 
 import Utils
 import WorkDirectory as WD
@@ -89,6 +90,62 @@ def show(ang, mag, mask=None, outDir=None, outName="bgr", waitTime=None, magFact
         else:
             cv2.waitKey( waitTime )
 
+from numba import cuda
+
+@cuda.jit
+def k_filter_mask(mask, v, nv):
+    tx = cuda.blockIdx.x * cuda.blockDim.x + cuda.threadIdx.x
+    ty = cuda.blockIdx.y * cuda.blockDim.y + cuda.threadIdx.y
+
+    xStride = cuda.blockDim.x * cuda.gridDim.x * 3
+    yStride = cuda.blockDim.y * cuda.gridDim.y * 3
+
+    for y in range(ty*3+1, mask.shape[0]-1, yStride):
+        for x in range(tx*3+1, mask.shape[1]-1, xStride):
+            for i in range(3):
+                my = y + i
+                for j in range(3):
+                    mx = x + j
+
+                    if ( mask[my, mx] == v ):
+                        if ( mask[my,   mx-1] != v and \
+                             mask[my,   mx+1] != v and \
+                             mask[my-1, mx]   != v and \
+                             mask[my+1, mx]   != v ):
+                            mask[my, mx] = nv
+
+def filter_mask(mask, v, nv):
+    """
+    v is the value for labeled pixel.
+    nv is the value for non-labeled pixel.
+    """
+
+    h, w = mask.shape[0], mask.shape[1]
+
+    for i in range(1,h-1):
+        for j in range(1,w-1):
+            if ( mask[i, j] == v):
+                if ( mask[i, j-1] != v and \
+                     mask[i, j+1] != v and \
+                     mask[i-1, j] != v and \
+                     mask[i+1, j] != v ):
+                    mask[i, j] = nv
+
+    # dMask = cuda.to_device(mask)
+
+    # threadsOneDim = 16
+    # coveragePerBlock = threadsOneDim * 3 + 2
+    # blocksH = int(math.ceil( h / coveragePerBlock ))
+    # blocksW = int(math.ceil( w / coveragePerBlock ))
+
+    # cuda.synchronize()
+    # k_filter_mask[[blocksW, blocksH, 1], [threadsOneDim, threadsOneDim, 1]](dMask, v, nv)
+    # cuda.synchronize()
+
+    # mask = dMask.copy_to_host()
+
+    return mask
+
 def get_center_and_neighbors(h, w, i, j):
     c = i*w+j
     idx = [c] # Center.
@@ -146,7 +203,7 @@ def get_distance_from_coordinate_table(tab, h, w, i, j, showDetail=False):
         print("c = {}. ".format(c))
         print("relativeDist = {}. ".format(relativeDist))
 
-    return c, ddMin, ddMax, ( x[0], y[0], z[0] )
+    return c, ddMin, ddMax, np.array( ( x[0], y[0], z[0] ), dtype=NP_FLOAT )
 
 def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, p=0.001, D=1000):
     """
@@ -166,10 +223,19 @@ def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, p=0.001, D
     assert( x01.shape[0] == 3 )
 
     # Geometory.
-    H = M0.dot( inv_m(M1) )
-    h20 = H[2, 0] / cam_1.focal
-    h21 = H[2, 1] / cam_1.focal
-    ah22 = np.absolute( H[2,2] )
+    # H   = M0.dot( inv_m(M1) )
+    # h00 = np.absolute( H[0, 0] / cam_1.focal )
+    # h01 = np.absolute( H[0, 1] / cam_1.focal )
+    # h10 = np.absolute( H[1, 0] / cam_1.focal )
+    # h11 = np.absolute( H[1, 1] / cam_1.focal )
+    # h20 = np.absolute( H[2, 0] / cam_1.focal )
+    # h21 = np.absolute( H[2, 1] / cam_1.focal )
+
+    # dxDxy = max( h00, h01 )
+    # dyDxy = max( h10, h11 )
+    # dzDxy = max( h20, h21 )
+
+    # rMax = np.sqrt( dxDxy**2 + dyDxy**2 + dzDxy**2 )
 
     # Allocate memory.
     occupancyMap00 = np.zeros( imageSize, dtype=np.int32 ) - 1
@@ -211,11 +277,11 @@ def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, p=0.001, D
             continue
 
         showDetail = False
-        # if ( iy == 118 and ix == 310 ):
+        # if ( iy == 329 and ix == 559 ):
         #     showDetail = True
 
         # Get the current depth.
-        d0, ddMin, ddMax, _ = get_distance_from_coordinate_table(x01, h, w, iy, ix, showDetail)
+        d0, ddMin, ddMax, coor0 = get_distance_from_coordinate_table(x01, h, w, iy, ix, showDetail)
         dr = 0.0
 
         # Check if the new index is occupied.
@@ -224,20 +290,28 @@ def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, p=0.001, D
 
             # Get the index registered in the occupancy map.
             opIndex = occupancyMap00[iv, iu]
+            opY = opIndex // w
+            opX = opIndex % w
 
             # Get the depth at the registered index.
-            dr, ddMin, ddMax, _ = get_distance_from_coordinate_table(x01, h, w, opIndex // w, opIndex % w)
+            dr, ddMin, ddMax, _ = get_distance_from_coordinate_table(x01, h, w, opY, opX)
 
             if ( d0 < dr ):
                 # Current point is nearer to the camera.
                 # Update the occlusion mask.
-                if ( maskOcclusion[ opIndex // w, opIndex % w ] == 0 ):
-                    maskOcclusion[ opIndex // w, opIndex % w ] = SELF_OCC
+                # if ( np.absolute(opY - iy) > 1 or np.absolute( opX - ix ) > 1 ):
+                if ( maskOcclusion[ opY, opX ] == 0 ):
+                    maskOcclusion[ opY, opX ] = SELF_OCC
             elif ( d0 > dr ):
                 # Current point is farther.
                 # Update the occlusion mask.
+                # if ( np.absolute(opY - iy) > 1 or np.absolute( opX - ix ) > 1 ):
                 if ( maskOcclusion[ iy, ix ] == 0 ):
                     maskOcclusion[ iy, ix ] = SELF_OCC
+
+                if (showDetail):
+                    print("d0 = %f, dr = %f. " % ( d0, dr ))
+                    print("coor0 = {}. ".format( coor0 ))
 
                 # Stop the current loop.
                 continue
@@ -248,17 +322,26 @@ def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, p=0.001, D
         occupancyMap00[ iv, iu ] = i
 
         # Get the depth at x=iu, y=iv in the second image observed in the second camera.
-        d1, ddMin, ddMax, coor = get_distance_from_coordinate_table(x1, h, w, iv, iu, showDetail)
-
-        ddxy = max( np.absolute( h20*coor[2] ), np.absolute( h21*coor[2] ), ah22 )
+        d1, ddMin, ddMax, coor1 = get_distance_from_coordinate_table(x1, h, w, iv, iu, showDetail)
+        dist01 = distance_of_2_points( coor0, coor1 )
 
         if (showDetail):
             print("d0 = %f, dr = %f, d1 = %f, ddMin = %f, ddMax = %f. " % ( d0, dr, d1, ddMin, ddMax ))
+            print("coor0 = {}. ".format( coor0 ))
+            print("coor1 = {}. ".format( coor1 ))
+            print("dist01 = %f. " % (dist01))
+            # print("M0 = {}".format(M0))
+            # print("M1 = {}".format(M1))
+            # print("H = {}".format(H))
+            print("cam_1.forcal = %f. " % ( cam_1.focal ))
+            # print("rMax = %f, rMax*coor1[2] = %f. " % ( rMax, rMax*coor1[2] ))
+            print("d0 - d1 = %f." % (d0 - d1))
+            print("0.6*ddMax = %f." % (0.65*ddMax))
 
         if ( d0 > D and d1 > D ):
             # Points at infinity do not occlude each other.
             pass
-        elif ( d0 <= d1 or d0 - d1 <= ddxy ):
+        elif ( d0 <= d1 or d0 - d1 <= 0.65*ddMax ):
             # Current point is nearer to the camera or equals the distance of the corresponding pixel in the second image.
             # This is subject to the value of p. p is not check constantly.
             pass
@@ -270,18 +353,21 @@ def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, p=0.001, D
             if (showDetail):
                 print( "(iy %d, ix %d) cross-occ." % (iy, ix) )
 
-            if ( -1 != occupancyMap01[iv, iu] ):
-                # if ( occupancyMap01[iv, iu] == opIndex ):
-                #     continue
+            # if ( -1 != occupancyMap01[iv, iu] ):
+            #     # if ( occupancyMap01[iv, iu] == opIndex ):
+            #     #     continue
 
-                raise Exception( "Current pixel %d, wins pre-registered %d but occlued by second image at x=%d, y=%d (occupancyMap01: %d) with d0=%f, dr=%f, d1=%f, ddMin=%f, ddMax=%f. " \
-                    % ( i, opIndex, iu, iv, occupancyMap01[iv, iu], d0, dr, d1, ddMin, ddMax ) )
+            #     raise Exception( "Current pixel %d, wins pre-registered %d but occlued by second image at x=%d, y=%d (occupancyMap01: %d) with d0=%f, dr=%f, d1=%f, ddMin=%f, ddMax=%f. " \
+            #         % ( i, opIndex, iu, iv, occupancyMap01[iv, iu], d0, dr, d1, ddMin, ddMax ) )
 
             continue
 
         # Update the occupancy map.
         occupancyMap01[ iv, iu ] = i
         
+    maskOcclusion = filter_mask(maskOcclusion, SELF_OCC, 0)
+    maskOcclusion = filter_mask(maskOcclusion, CROSS_OCC, 0)
+
     return maskOcclusion, maskFOV, occupancyMap00, occupancyMap01
 
 def warp_error_by_index( img0, img1, u, v, idx0 ):
