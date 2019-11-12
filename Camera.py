@@ -42,7 +42,7 @@ class CameraBase(object):
 
         return x[0:2, :]
 
-    def from_depth_to_x_y(self, depth):
+    def from_depth_to_x_y(self, depth, dMax=None):
         wIdx = np.linspace( 0, self.imageSize[1] - 1, self.imageSize[1], dtype=np.int )
         hIdx = np.linspace( 0, self.imageSize[0] - 1, self.imageSize[0], dtype=np.int )
 
@@ -51,6 +51,13 @@ class CameraBase(object):
         u = u.astype(NP_FLOAT)
         v = v.astype(NP_FLOAT)
         
+        if ( dMax is not None):
+            if ( dMax > depth.min() ):
+                depth = np.clip( depth, 0, dMax )
+            else:
+                raise Exception("dMax = {} is not appropirate. depth.min() = {}, depth.max() = {}. ".format( \
+                    dMax, depth.min(), depth.max() ))
+
         x = ( u - self.pu ) * depth / self.focal
         y = ( v - self.pv ) * depth / self.focal
 

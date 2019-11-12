@@ -56,21 +56,21 @@ if __name__ == "__main__":
         suffix += "_nf"
 
     if ( args.ignore_all_occ_mask ):
-        tempMask = mask == CROSS_OCC
-        mask[tempMask] = 255
         tempMask = mask == SELF_OCC
+        mask[tempMask] = 255
+        tempMask = mask == CROSS_OCC
         mask[tempMask] = 255
         suffix += "_nc_ns"
     else:
-        if ( args.ignore_cross_occ_mask ):
-            tempMask = mask == CROSS_OCC
-            mask[tempMask] = 255
-            suffix += "_nc"
-
         if ( args.ignore_self_occ_mask ):
             tempMask = mask == SELF_OCC
             mask[tempMask] = 255
             suffix += "_ns"
+        
+        if ( args.ignore_cross_occ_mask ):
+            tempMask = mask == CROSS_OCC
+            mask[tempMask] = 255
+            suffix += "_nc"
     
     # Calculate the angle and distance.
     a, d, angleShift = calculate_angle_distance_from_du_dv( flow[:, :, 0], flow[:, :, 1], flagDegree=True )

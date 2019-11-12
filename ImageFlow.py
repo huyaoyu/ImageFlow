@@ -13,6 +13,7 @@ import numpy as np
 import numpy.linalg as LA
 import os
 import pandas
+import pcl
 import queue # python3.
 import time
 
@@ -23,6 +24,9 @@ from SimpleGeometory import distance_of_2_points
 from SimplePLY import output_to_ply 
 import Utils
 import WorkDirectory as WD
+
+# NumPy dtype for PCL routines.
+PCL_FLOAT=np.float32
 
 # Global variables used as constants.
 
@@ -205,6 +209,60 @@ def get_distance_from_coordinate_table(tab, h, w, i, j, showDetail=False):
 
     return c, ddMin, ddMax, np.array( ( x[0], y[0], z[0] ), dtype=NP_FLOAT )
 
+def estimate_surface_normal(x):
+    """
+    x is a 3-column array contains the 3D points.
+
+    This function is partially adopted from 
+    https://github.com/strawlab/python-pcl/blob/master/examples/official/Features/NormalEstimationUsingIntegralImages.py
+    """
+
+    # Convert x to pcl point cloud.
+    cloud = pcl.PointCloud(x.astype(PCL_FLOAT))
+
+    ne = cloud.make_NormalEstimation()
+    ne.set_RadiusSearch(1)
+    normals = ne.compute()
+
+    return normals.to_array()
+
+def check_two_surface_normals(n00, n11, v01, tPar = 0.75, eOth = 0.1):
+    """
+    n00, n11, v01: 3-element NumPy arrays. 3D vectors.
+    n00 and n11 are the surface normals at two locations.
+    v01 is the vector starts from 0 points to 1.
+
+    tPar and eOth are to control parameters. tPar is the threshould for
+    recognizing two vectors as parallel. eOth is the limit for determining 
+    if two vectors are othogonal.
+    """
+
+    # Normalization.
+    n00 = n00.reshape((-1, 1)) / np.linalg.norm(n00, 2)
+    n11 = n11.reshape((-1, 1)) / np.linalg.norm(n11, 2)
+    v01 = v01.reshape((-1, 1)) / np.linalg.norm(v01, 2)
+
+    # Use inner product as approximinity measure.
+    pNN = np.absolute( n00.transpose().dot( n11 ) )
+    pNV = np.absolute( n00.transpose().dot( v01 ) )
+
+    if ( pNN > tPar ):
+        flagParNN = True
+    else:
+        flagParNN = False
+
+    if ( pNV > tPar ):
+        flagParNV = True
+    else:
+        flagParNV = False
+
+    if ( pNV < eOth ):
+        flagOth = True
+    else:
+        flagOth = False
+
+    return flagParNN, flagParNV, flagOth, pNN, pNV
+
 def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, p=0.001, D=1000):
     """
     imageSize: height x width.
@@ -221,6 +279,15 @@ def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, p=0.001, D
     assert( u.shape[1] == v.shape[1] )
     assert( u.shape[0] * u.shape[1] == x01.shape[1] )
     assert( x01.shape[0] == 3 )
+
+    h = imageSize[0]
+    w = imageSize[1]
+
+    # Surface normal estimateion.
+    normals01 = estimate_surface_normal(x01.transpose())
+    # normals1  = estimate_surface_normal(x1.transpose())
+
+    print("normals01 non nan number = {}. ".format( np.isfinite(normals01).sum() ))
 
     # Geometory.
     # H   = M0.dot( inv_m(M1) )
@@ -246,9 +313,6 @@ def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, p=0.001, D
     # Reshape input arguments.
     u = u.reshape((-1,))
     v = v.reshape((-1,))
-
-    h = imageSize[0]
-    w = imageSize[1]
 
     # Loop for every pixel index.
     for i in range( h*w ):
@@ -277,12 +341,21 @@ def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, p=0.001, D
             continue
 
         showDetail = False
-        # if ( iy == 329 and ix == 559 ):
+        if ( iy == 348 and ix == 88 ):
+            showDetail = True
+
+        # if ( iu == 282 and iv == 123 ):
         #     showDetail = True
 
+        if ( showDetail ):
+            print("iy = %d, ix = %d. " % ( iy, ix ))
+            print("iu = %d, iv = %d. " % ( iu, iv ))
+
         # Get the current depth.
-        d0, ddMin, ddMax, coor0 = get_distance_from_coordinate_table(x01, h, w, iy, ix, showDetail)
+        d0, ddMin0, ddMax0, coor0 = get_distance_from_coordinate_table(x01, h, w, iy, ix, showDetail)
         dr = 0.0
+        opIndex = np.nan
+        flagParNN, flagParNV, flagOth, pNN, pNV = None, None, None, None, None
 
         # Check if the new index is occupied.
         if ( -1 != occupancyMap00[iv, iu] ):
@@ -294,39 +367,76 @@ def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, p=0.001, D
             opX = opIndex % w
 
             # Get the depth at the registered index.
-            dr, ddMin, ddMax, _ = get_distance_from_coordinate_table(x01, h, w, opY, opX)
+            dr, ddMin, ddMax, coorR = get_distance_from_coordinate_table(x01, h, w, opY, opX)
 
             if ( d0 < dr ):
                 # Current point is nearer to the camera.
-                # Update the occlusion mask.
-                # if ( np.absolute(opY - iy) > 1 or np.absolute( opX - ix ) > 1 ):
-                if ( maskOcclusion[ opY, opX ] == 0 ):
+                # Update the occupancy map.
+                occupancyMap00[ iv, iu ] = i
+
+                if ( np.isfinite(normals01[i]).sum() >= 3 and \
+                     np.isfinite(normals01[opIndex]).sum() >= 3 ):
+                    # Check surface normal.
+                    v01 = np.array([ coorR[0] - coor0[0], coorR[1] - coor0[1], coorR[2] - coor0[2] ], dtype=NP_FLOAT)
+                    flagParNN, flagParNV, flagOth, pNN, pNV = check_two_surface_normals( \
+                        normals01[opIndex][:3], normals01[i][:3], v01 )
+
+                    if ( flagOth ):
+                        # Not an occlusion.
+                        pass
+                    else:
+                        # Update the occlusion mask.
+                        maskOcclusion[ opY, opX ] = SELF_OCC
+                else:
+                    # Update the occlusion mask.
                     maskOcclusion[ opY, opX ] = SELF_OCC
+
             elif ( d0 > dr ):
                 # Current point is farther.
-                # Update the occlusion mask.
-                # if ( np.absolute(opY - iy) > 1 or np.absolute( opX - ix ) > 1 ):
-                if ( maskOcclusion[ iy, ix ] == 0 ):
-                    maskOcclusion[ iy, ix ] = SELF_OCC
 
-                if (showDetail):
-                    print("d0 = %f, dr = %f. " % ( d0, dr ))
-                    print("coor0 = {}. ".format( coor0 ))
+                if ( np.isfinite(normals01[i]).sum() >= 3 and \
+                     np.isfinite(normals01[opIndex]).sum() >= 3 ):
+                    # Check surface normal.
+                    v01 = np.array([ coorR[0] - coor0[0], coorR[1] - coor0[1], coorR[2] - coor0[2] ], dtype=NP_FLOAT)
+                    flagParNN, flagParNV, flagOth, pNN, pNV = check_two_surface_normals( \
+                        normals01[i][:3], normals01[opIndex][:3], v01 )
+
+                    if ( flagOth ):
+                        # Not an occlusion.
+                        pass
+                    else:
+                        # Update the occlusion mask.
+                        maskOcclusion[ iy, ix ] = SELF_OCC
+                else:
+                    # Update the occlusion mask.
+                    maskOcclusion[ iy, ix ] = SELF_OCC
 
                 # Stop the current loop.
                 continue
+
             else:
                 raise Exception("%d pixel has same distance with %d pixel." % ( i, opIndex ))
-        
-        # Update the occupancy map.
-        occupancyMap00[ iv, iu ] = i
+
+        else:
+           # Update the occupancy map.
+            occupancyMap00[ iv, iu ] = i 
+
+        if (showDetail):
+            print("d0 = %f, dr = %f. " % ( d0, dr ))
+            print("coor0 = {}. ".format( coor0 ))
+            if ( np.isfinite(opIndex) ):
+                print("normals01[{}] = {}. ".format( i, normals01[i] ))
+                print("normals01[{}] = {}. ".format( opIndex, normals01[opIndex] ))
+                print("v01 = {}. ".format( v01 ))
+                print("flagParNN = {}, flagParNV = {}, flagOth = {}. ".format( flagParNN, flagParNV, flagOth ))
+                print("pNN = {}, pNV = {}. ".format(pNN, pNV))
 
         # Get the depth at x=iu, y=iv in the second image observed in the second camera.
-        d1, ddMin, ddMax, coor1 = get_distance_from_coordinate_table(x1, h, w, iv, iu, showDetail)
+        d1, ddMin1, ddMax1, coor1 = get_distance_from_coordinate_table(x1, h, w, iv, iu, showDetail)
         dist01 = distance_of_2_points( coor0, coor1 )
 
         if (showDetail):
-            print("d0 = %f, dr = %f, d1 = %f, ddMin = %f, ddMax = %f. " % ( d0, dr, d1, ddMin, ddMax ))
+            print("d0 = %f, dr = %f, d1 = %f, ddMin0 = %f, ddMax0 = %f. " % ( d0, dr, d1, ddMin0, ddMax0 ))
             print("coor0 = {}. ".format( coor0 ))
             print("coor1 = {}. ".format( coor1 ))
             print("dist01 = %f. " % (dist01))
@@ -336,19 +446,20 @@ def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, p=0.001, D
             print("cam_1.forcal = %f. " % ( cam_1.focal ))
             # print("rMax = %f, rMax*coor1[2] = %f. " % ( rMax, rMax*coor1[2] ))
             print("d0 - d1 = %f." % (d0 - d1))
-            print("0.6*ddMax = %f." % (0.65*ddMax))
+            print("0.6*ddMax = %f." % (ddMax0))
 
-        if ( d0 > D and d1 > D ):
+        if ( d0 >= D and d1 >= D ):
             # Points at infinity do not occlude each other.
             pass
-        elif ( d0 <= d1 or d0 - d1 <= 0.65*ddMax ):
+        elif ( d0 <= d1 or d0 - d1 <= 1.1*ddMax0 ):
             # Current point is nearer to the camera or equals the distance of the corresponding pixel in the second image.
             # This is subject to the value of p. p is not check constantly.
             pass
         else:
             # Current point is occluded by the corresponding pixel in the second image.
             # Update the occlusion mask.
-            maskOcclusion[ iy, ix ] = CROSS_OCC
+            if ( maskOcclusion[ iy, ix ] != SELF_OCC ):
+                maskOcclusion[ iy, ix ] = CROSS_OCC
 
             if (showDetail):
                 print( "(iy %d, ix %d) cross-occ." % (iy, ix) )
@@ -581,11 +692,11 @@ def save_flow(fnBase, flowSuffix, maskSuffix, du, dv, maskOcc, maskFOV):
     # Create a 1-channel NumPy array.
     mask = np.zeros_like(du, dtype=np.uint8) + 255
 
-    tempMask = maskOcc == SELF_OCC
-    mask[tempMask] = SELF_OCC
-
     tempMask = maskOcc == CROSS_OCC
     mask[tempMask] = CROSS_OCC
+
+    tempMask = maskOcc == SELF_OCC
+    mask[tempMask] = SELF_OCC
 
     tempMask = maskFOV == OUT_OF_FOV_POSITIVE_Z
     mask[tempMask] = OUT_OF_FOV_POSITIVE_Z
@@ -634,9 +745,10 @@ def process_single_process(name, outDir, \
         print("R = \n{}".format(R))
 
     # Calculate the coordinates in the first camera's frame.
-    X0C = cam_0.from_depth_to_x_y(depth_0) # Coordinates in the camera frame. z-axis pointing forwards.
+    # X0C = cam_0.from_depth_to_x_y(depth_0) # Coordinates in the camera frame. z-axis pointing forwards.
+    X0C = cam_0.from_depth_to_x_y(depth_0, distanceRange) # Coordinates in the camera frame. z-axis pointing forwards.
     X0  = cam_0.worldRI.dot(X0C)           # Corrdinates in the NED frame. z-axis pointing downwards.
-    
+
     if ( flagDebug ):
         try:
             output_to_ply(debugOutDir + '/XInCam_0.ply', X0C, cam_0.imageSize, distanceRange, CAMERA_ORIGIN)
@@ -655,7 +767,8 @@ def process_single_process(name, outDir, \
             print(e)
 
     # Calculate the coordinates in the second camera's frame.
-    X1C = cam_1.from_depth_to_x_y(depth_1) # Coordinates in the camera frame. z-axis pointing forwards.
+    # X1C = cam_1.from_depth_to_x_y(depth_1) # Coordinates in the camera frame. z-axis pointing forwards.
+    X1C = cam_1.from_depth_to_x_y(depth_1, distanceRange) # Coordinates in the camera frame. z-axis pointing forwards.
 
     if ( flagDebug ):
         X1  = cam_1.worldRI.dot(X1C)           # Corrdinates in the NED frame. z-axis pointing downwards.
