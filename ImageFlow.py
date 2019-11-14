@@ -20,13 +20,14 @@ import time
 from CommonType import NP_FLOAT
 
 from Camera import CameraBase
-from SimpleGeometory import distance_of_2_points
+from SimpleGeometory import distance_of_2_points, clip_distance
 from SimplePLY import output_to_ply 
 import Utils
 import WorkDirectory as WD
 
 # NumPy dtype for PCL routines.
-PCL_FLOAT=np.float32
+PCL_FLOAT = np.float32
+TWO_PI = np.pi * 2
 
 # Global variables used as constants.
 
@@ -67,15 +68,31 @@ def du_dv(nu, nv, imageSize):
 
     return nu - u, nv - v
 
-def show(ang, mag, mask=None, outDir=None, outName="bgr", waitTime=None, magFactor=1.0, angShift=0.0, flagShowFigure=True):
+def map_normalized_angle(ang, maxVal=255):
+    m = ang * maxVal * 2
+
+    mask = m > maxVal
+    m[mask] = maxVal*2 - m[mask]
+
+    return np.clip( m, 0, maxVal )
+
+def show(ang, mag, mask=None, outDir=None, outName="bgr", waitTime=None, magFactor=1.0, angShift=0.0, angMax=TWO_PI, flagShowFigure=True, hueMax=179):
     """ang: degree"""
+    assert hueMax >= 0
+    assert hueMax <= 255
+
     # Use Hue, Saturation, Value colour model 
     hsv = np.zeros( ( ang.shape[0], ang.shape[1], 3 ) , dtype=np.uint8)
     hsv[..., 1] = 255
 
     # mag, ang = cv2.cartToPolar(flow[..., 0], flow[..., 1]
 
-    hsv[..., 0] = (ang + angShift)/ 2
+    ang = ang + angShift
+
+    am = ang < 0
+    ang[am] = ang[am] + np.pi * 2
+
+    hsv[..., 0] = np.clip( ang / angMax * hueMax, 0, hueMax).astype(np.uint8)
     hsv[..., 2] = np.clip(mag * magFactor, 0, 255).astype(np.uint8) #cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX)
     bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
 
@@ -86,13 +103,64 @@ def show(ang, mag, mask=None, outDir=None, outName="bgr", waitTime=None, magFact
     if ( outDir is not None ):
         cv2.imwrite(outDir + "/%s_vis.png" % (outName), bgr, [cv2.IMWRITE_PNG_COMPRESSION, 0])
 
+    key = None
+
     if ( True == flagShowFigure ):
         cv2.imshow("HSV2GBR", bgr)
 
         if ( waitTime is None ):
-            cv2.waitKey()
+            key = cv2.waitKey()
         else:
-            cv2.waitKey( waitTime )
+            key = cv2.waitKey( waitTime )
+
+    return key
+
+def show_as_KITTI(ang, mag, maxF=None, n=8, mask=None, outDir=None, outName="bgr", waitTime=None, angShift=0.0, flagShowFigure=True, hueMax=179):
+    """
+    Show a optical flow field as the KITTI dataset does.
+    Some parts of this function is the transform of the original MATLAB code flow_to_color.m.
+    """
+
+    assert hueMax >= 0
+    assert hueMax <= 255
+
+    if ( maxF is None ):
+        maxF = mag.max() * 1.0
+
+    # Use Hue, Saturation, Value colour model 
+    hsv = np.zeros( ( ang.shape[0], ang.shape[1], 3 ) , dtype=NP_FLOAT)
+
+    am = ang < 0
+    ang[am] = ang[am] + np.pi * 2
+
+    hsv[ :, :, 0 ] = np.remainder( ( ang + angShift ) / (2*np.pi), 1 )
+    hsv[ :, :, 1 ] = mag / maxF * n
+    hsv[ :, :, 2 ] = (n - hsv[:, :, 1])/n
+
+    hsv[:, :, 0] = np.clip( hsv[:, :, 0], 0, 1 ) * hueMax
+    hsv[:, :, 1:3] = np.clip( hsv[:, :, 1:3], 0, 1 ) * 255
+    hsv = hsv.astype(np.uint8)
+
+    bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+
+    if ( mask is not None ):
+        mask = mask != 255
+        bgr[mask] = np.array([0, 0 ,0], dtype=np.uint8)
+
+    if ( outDir is not None ):
+        cv2.imwrite(outDir + "/%s_vis.png" % (outName), bgr, [cv2.IMWRITE_PNG_COMPRESSION, 0])
+
+    key = None
+
+    if ( True == flagShowFigure ):
+        cv2.imshow("HSV2GBR", bgr)
+
+        if ( waitTime is None ):
+            key = cv2.waitKey()
+        else:
+            key = cv2.waitKey( waitTime )
+
+    return key
 
 from numba import cuda
 
@@ -263,7 +331,7 @@ def check_two_surface_normals(n00, n11, v01, tPar = 0.75, eOth = 0.1):
 
     return flagParNN, flagParNV, flagOth, pNN, pNV
 
-def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, p=0.001, D=1000):
+def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, D=1000, p=0.001):
     """
     imageSize: height x width.
     x01: The 3D coordinates of the pixels in the first image observed in the frame of the second camera. 3-row 2D array.
@@ -324,14 +392,6 @@ def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, p=0.001, D
         iy = i // w
         ix = i % w
 
-        # Check if the new index is out of boundary?
-        if ( iu < 0 or iv < 0 or iu >= w or iv >= h ):
-            # Update the FOV mask.
-            maskFOV[iy, ix] = OUT_OF_FOV_POSITIVE_Z
-
-            # Stop the current loop.
-            continue
-        
         # Check if the current point is on the opposite side of the image plane of the second camera.
         if ( x01[2, i] <= 0 ):
             # Update the FOV mask.
@@ -340,8 +400,16 @@ def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, p=0.001, D
             # Stop the current loop.
             continue
 
+        # Check if the new index is out of boundary?
+        if ( iu < 0 or iv < 0 or iu >= w or iv >= h ):
+            # Update the FOV mask.
+            maskFOV[iy, ix] = OUT_OF_FOV_POSITIVE_Z
+
+            # Stop the current loop.
+            continue
+
         showDetail = False
-        if ( iy == 348 and ix == 88 ):
+        if ( iy == 8 and ix == 342 ):
             showDetail = True
 
         # if ( iu == 282 and iv == 123 ):
@@ -369,7 +437,10 @@ def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, p=0.001, D
             # Get the depth at the registered index.
             dr, ddMin, ddMax, coorR = get_distance_from_coordinate_table(x01, h, w, opY, opX)
 
-            if ( d0 < dr ):
+            if ( d0 >= D and dr >= D ):
+                # Points at infinity do not occluded each other.
+                pass
+            elif ( d0 < dr ):
                 # Current point is nearer to the camera.
                 # Update the occupancy map.
                 occupancyMap00[ iv, iu ] = i
@@ -390,7 +461,6 @@ def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, p=0.001, D
                 else:
                     # Update the occlusion mask.
                     maskOcclusion[ opY, opX ] = SELF_OCC
-
             elif ( d0 > dr ):
                 # Current point is farther.
 
@@ -413,10 +483,8 @@ def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, p=0.001, D
 
                 # Stop the current loop.
                 continue
-
             else:
                 raise Exception("%d pixel has same distance with %d pixel." % ( i, opIndex ))
-
         else:
            # Update the occupancy map.
             occupancyMap00[ iv, iu ] = i 
@@ -512,7 +580,7 @@ def warp_error_by_index( img0, img1, u, v, idx0 ):
 
     return dImg0.reshape( (h, w) ), dImg1.reshape( (h, w) )
 
-def evaluate_warp_error( img0, img1, x01, x1, u, v, cam_0, cam_1, M0, M1 ):
+def evaluate_warp_error( img0, img1, x01, x1, u, v, cam_0, cam_1, M0, M1, maxDepth ):
     """
     x01: The 3D coordinates of the pixels in the first image observed in the frame of the second camera. 3-row 2D array.
     x1: The 3D coordinates of the pixels in the second image observed in the frame of the second camera. 3-row 2D array.
@@ -524,7 +592,7 @@ def evaluate_warp_error( img0, img1, x01, x1, u, v, cam_0, cam_1, M0, M1 ):
     w = img0.shape[1]
 
     # Get the masks.
-    maskOcclusion, maskFOV, occupancyMap00, occupancyMap01 = create_warp_masks( img0.shape[:2], x01, x1, u, v, cam_0, cam_1, M0, M1 )
+    maskOcclusion, maskFOV, occupancyMap00, occupancyMap01 = create_warp_masks( img0.shape[:2], x01, x1, u, v, cam_0, cam_1, M0, M1, maxDepth )
 
     # Make a mask for the occupancyMap00
     mask00 = occupancyMap00 != -1 
@@ -544,7 +612,7 @@ def evaluate_warp_error( img0, img1, x01, x1, u, v, cam_0, cam_1, M0, M1 ):
            dImg0_01, dImg1_01, occupancyMap01, mask01, maskOcclusion, maskFOV
 
 def warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v, \
-        cam_0, cam_1, M0, M1):
+        cam_0, cam_1, M0, M1, maxDepth):
     cam0ImgFn = "%s/%s%s%s" % ( imgDir, poseID_0, imgSuffix, imgExt )
     cam1ImgFn = "%s/%s%s%s" % ( imgDir, poseID_1, imgSuffix, imgExt )
 
@@ -557,7 +625,7 @@ def warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v, 
     dImg0_00, dImg1_00, occupancyMap_00, occupancyMask_00, \
     dImg0_01, dImg1_01, occupancyMap_01, occupancyMask_01, \
     maskOcc, maskFOV \
-         = evaluate_warp_error( cam0_img, cam1_img, X_01C, X1C, u, v, cam_0, cam_1, M0, M1 )
+         = evaluate_warp_error( cam0_img, cam1_img, X_01C, X1C, u, v, cam_0, cam_1, M0, M1, maxDepth )
 
     # Warp the image.
     warppedImg = np.zeros_like(cam0_img, dtype=np.uint8)
@@ -746,7 +814,7 @@ def process_single_process(name, outDir, \
 
     # Calculate the coordinates in the first camera's frame.
     # X0C = cam_0.from_depth_to_x_y(depth_0) # Coordinates in the camera frame. z-axis pointing forwards.
-    X0C = cam_0.from_depth_to_x_y(depth_0, distanceRange) # Coordinates in the camera frame. z-axis pointing forwards.
+    X0C = cam_0.from_depth_to_x_y(depth_0) # Coordinates in the camera frame. z-axis pointing forwards.
     X0  = cam_0.worldRI.dot(X0C)           # Corrdinates in the NED frame. z-axis pointing downwards.
 
     if ( flagDebug ):
@@ -768,7 +836,7 @@ def process_single_process(name, outDir, \
 
     # Calculate the coordinates in the second camera's frame.
     # X1C = cam_1.from_depth_to_x_y(depth_1) # Coordinates in the camera frame. z-axis pointing forwards.
-    X1C = cam_1.from_depth_to_x_y(depth_1, distanceRange) # Coordinates in the camera frame. z-axis pointing forwards.
+    X1C = cam_1.from_depth_to_x_y(depth_1) # Coordinates in the camera frame. z-axis pointing forwards.
 
     if ( flagDebug ):
         X1  = cam_1.worldRI.dot(X1C)           # Corrdinates in the NED frame. z-axis pointing downwards.
@@ -816,10 +884,14 @@ def process_single_process(name, outDir, \
     # a, d, angleShift = calculate_angle_distance_from_du_dv( du, dv, flagDegree )
     # angleAndDist     = make_angle_distance(cam_0, a, d)
 
+    # Depth clipping.
+    X_01C = clip_distance(X_01C, distanceRange)
+    X1C   = clip_distance(X1C, distanceRange)
+
     # warp the image to see the result
     maskOcc, maskFOV, warppedImg, dImg1_00, dImg1_01, occupancyMask_00, occupancyMask_01 \
          = warp_image(imgDir, poseID_0, poseID_1, imgSuffix, imgExt, X_01C, X1C, u, v, \
-             cam_0, cam_1, M0, M1)
+             cam_0, cam_1, M0, M1, distanceRange*0.9)
 
     save_flow( "%s/%s" % (outDir, poseID_0), "_flow", "_mask", du, dv, maskOcc, maskFOV )
 
@@ -992,7 +1064,7 @@ def reshape_idx_array(idxArray):
     s = int(math.ceil(math.sqrt(N)))
 
     # Create a new index array.
-    idx2D = np.zeros( (s*s, ), dtype=np.int ) + N
+    idx2D = np.zeros( (s*s, ), dtype=np.int ) + idxArray.max()
     idx2D[:N] = idxArray
 
     # Reshape and transpose.
@@ -1152,14 +1224,15 @@ if __name__ == "__main__":
     loggerQueue.put("Main: All processes started.")
     loggerQueue.join()
 
-    nIdx  = idxArray.size
-    nIdxR = idxArrayR.size
+    nIdx   = idxArray.size
+    nIdxR  = idxArrayR.size
+    maxIdx = idxArray.max()
 
     for i in range(nIdxR):
         # The index of cam_0.
         idx_0 = int(idxArrayR[i])
 
-        if ( idx_0 == nIdx or idx_0 == nIdx - 1):
+        if ( idx_0 == maxIdx):
             continue
 
         idx_1 = idx_0 + 1

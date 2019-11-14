@@ -1,5 +1,6 @@
 from __future__ import print_function
 
+import copy
 import numpy as np
 
 from CommonType import NP_FLOAT
@@ -8,6 +9,28 @@ def distance_of_2_points(p0, p1):
     d = p0.reshape((-1,)) - p1.reshape((-1,))
 
     return np.linalg.norm( d, 2 )
+
+def clip_distance(coor, dMax):
+    """
+    coor is a 3xn coordinate array.
+    """
+
+    if ( dMax <= 0 ):
+        raise Exception("dMax should be positive. dMax = {}. ".format( dMax ))
+
+    if ( coor.shape[0] != 3 ):
+        raise Exception("d.shape = {}. ".format(coor.shape))
+
+    # Calculate the distance of every points.
+    d = np.linalg.norm( coor, axis=0 )
+    r = d / dMax
+    mask = r > 1.0
+
+    newCoor = copy.deepcopy(coor)
+
+    newCoor[:, mask] = coor[:, mask] / r[mask]
+
+    return newCoor
 
 def from_quaternion_to_rotation_matrix(q):
     """

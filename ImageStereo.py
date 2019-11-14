@@ -170,11 +170,12 @@ def find_stereo_occlusions_naive(depth_0, depth_1, disp, BF):
 def merge_masks(maskFOV, maskOcc):
     mask = np.zeros_like(maskFOV, dtype=np.uint8) + 255
 
-    tempMask = maskOcc == STEREO_SELF_OCC
-    mask[tempMask] = STEREO_SELF_OCC
-
+    # The order of the application of the masks matters.
     tempMask = maskOcc == STEREO_CROSS_OCC
     mask[tempMask] = STEREO_CROSS_OCC
+
+    tempMask = maskOcc == STEREO_SELF_OCC
+    mask[tempMask] = STEREO_SELF_OCC
 
     tempMask = maskFOV == STEREO_OUT_OF_FOV
     mask[tempMask] = STEREO_OUT_OF_FOV

@@ -5,6 +5,13 @@ import numpy as np
 
 from CommonType import NP_FLOAT
 
+def clip_depth(depth, dMax):
+    if ( dMax > depth.min() ):
+         return np.clip( depth, 0, dMax )
+    else:
+        raise Exception("dMax = {} is not appropirate. depth.min() = {}, depth.max() = {}. ".format( \
+            dMax, depth.min(), depth.max() ))
+
 class CameraBase(object):
     def __init__(self, focal, imageSize):
         self.focal = focal
@@ -52,11 +59,7 @@ class CameraBase(object):
         v = v.astype(NP_FLOAT)
         
         if ( dMax is not None):
-            if ( dMax > depth.min() ):
-                depth = np.clip( depth, 0, dMax )
-            else:
-                raise Exception("dMax = {} is not appropirate. depth.min() = {}, depth.max() = {}. ".format( \
-                    dMax, depth.min(), depth.max() ))
+            depth = clip_depth( depth, dMax )
 
         x = ( u - self.pu ) * depth / self.focal
         y = ( v - self.pv ) * depth / self.focal
