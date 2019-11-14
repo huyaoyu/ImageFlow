@@ -15,19 +15,20 @@ def convert_DEA_2_XYZ(d, e, a):
     return np.stack((x, y, z), axis=1)
 
 class ScanlineParams(object):
-    def __init__(self, f, height, a=None, e=None, h=None, b0=None, b1=None, t=None):
+    def __init__(self, f, height, a=None, e=None, h=None, bx0=None, bx1=None, by0=None, by1=None, t=None):
         super(ScanlineParams, self).__init__()
 
         self.f = f
         self.width  = f + f # Assuming 90 degrees FOV.
         self.height = height
 
-        self.a  = a
-        self.e  = e
-        self.h  = h
-        self.b0 = b0
-        self.b1 = b1
-        self.t  = t
+        self.a   = a
+        self.e   = e
+        self.bx0 = bx0
+        self.bx1 = bx1
+        self.by0 = by0
+        self.by1 = by1
+        self.t   = t
     
     def check_interval(self, interval):
         """
@@ -78,29 +79,36 @@ class ScanlineParams(object):
 
         p = p + self.width/2
 
-        b0 = np.floor(p)
-        b1 = np.ceil(p)
+        bx0 = np.floor(p)
+        bx1 = np.ceil(p)
 
-        if ( not self.check_interval(b0) ):
-            raise Exception("b0 has bad interval.")
+        if ( not self.check_interval(bx0) ):
+            raise Exception("bx0 has bad interval.")
         
-        if ( not self.check_interval(b1) ):
-            raise Exception("b1 has bad interval.")
+        if ( not self.check_interval(bx1) ):
+            raise Exception("bx1 has bad interval.")
 
-        t = p - b0
+        t = p - bx0
 
-        if ( b0[0] < 0 or b1[-1] >= self.width ):
-            raise Exception("b0[0] = %f, b1[-1] = %f. " % ( b0[0], b1[-1] ))
+        if ( bx0[0] < 0 or bx1[-1] >= self.width ):
+            raise Exception("bx0[0] = %f, bx1[-1] = %f. " % ( bx0[0], bx1[-1] ))
 
         # The h index.
-        idxH = np.floor( self.f * np.tan(E / 180.0 * np.pi) + self.height/2 )
+        p = self.f / np.cos( a / 180.0 * np.pi ) * np.tan( E / 180.0 * np.pi ) + self.height/2
 
-        self.a  = a
-        self.e  = np.tile(E, [N])
-        self.h  = np.tile(idxH, [N]).astype(np.int)
-        self.b0 = b0.astype(np.int)
-        self.b1 = b1.astype(np.int)
-        self.t  = t
+        by0 = np.floor(p)
+        by1 = np.ceil(p)
+
+        if ( by0[0] < 0 or by1[-1] >= self.height ):
+            raise Exception("by0[0] = %f, by1[-1] = %f. " % ( by0[0], by1[-1] ))
+
+        self.a   = a
+        self.e   = np.tile(E, [N])
+        self.bx0 = bx0.astype(np.int)
+        self.bx1 = bx1.astype(np.int)
+        self.by0 = by0.astype(np.int)
+        self.by1 = by1.astype(np.int)
+        self.t   = t
 
 class SimulatedLIDAR(object):
     def __init__(self, f, h, desc=None):
@@ -147,14 +155,14 @@ class SimulatedLIDAR(object):
         """
 
         # Get the depth for the bounds.
-        dB0 = depth[ sp.h, sp.b0 ]
-        dB1 = depth[ sp.h, sp.b1 ]
+        dB0 = depth[ sp.by0, sp.bx0 ]
+        dB1 = depth[ sp.by1, sp.bx1 ]
 
         # Interpolate.
         d = dB0 + sp.t * ( dB1 - dB0 )
 
         # Distance.
-        dist = self.convert_depth_2_distance( sp.b0 + sp.t, sp.h, d )
+        dist = self.convert_depth_2_distance( sp.bx0 + sp.t , sp.by0 + sp.t, d )
 
         return dist, copy.deepcopy(sp.e), copy.deepcopy(sp.a) + aShift
 
@@ -198,7 +206,7 @@ if __name__ == "__main__":
 
     print("Test SimulatedLIDAR.")
 
-    sld = SimulatedLIDAR( 580, 672 )
+    sld = SimulatedLIDAR( 580, 768 )
     sld.set_description( [ \
         { "id":  0, "E":-25,     "flagFlip":True, "resA": 0.1, "offA":  1.4 },
         { "id":  1, "E":-1,      "flagFlip":True, "resA": 0.1, "offA": -4.2 },
@@ -237,7 +245,7 @@ if __name__ == "__main__":
     sld.initialize()
 
     # Test with dummy detph images.
-    depth = np.zeros( (672, 1160), dtype=np.float64 ) + 10
+    depth = np.zeros( (768, 1160), dtype=np.float64 ) + 10
 
     depthList = [ depth, depth, depth, depth ]
 

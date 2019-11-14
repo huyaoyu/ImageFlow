@@ -7,3 +7,11 @@ sample/ImageFlow
 *.jpg
 *.ipynb
 *.log
+*.ply
+*.txt
+*.pp3
+sample/ImageFlow_Backup/
+TestXInput.json
+TestYawInput.json
+gascola_yaw_512.json
+
