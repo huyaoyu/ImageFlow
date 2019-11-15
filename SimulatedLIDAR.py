@@ -1,12 +1,16 @@
 from __future__ import print_function
 
+import argparse
 import copy
 import numpy as np
 
 def convert_DEA_2_XYZ(d, e, a):
-    # Shift a with -90 degrees.
+    """
+    e and a are defined in the camera frame with z-axis pointing forward.
+    """
 
-    a = a - 90
+    # Shift a with -90 degrees.
+    a = -a + 90
     c = np.cos( e/180.0*np.pi )
     x = d * c * np.cos( a/180.0*np.pi )
     z = d * c * np.sin( a/180.0*np.pi )
@@ -14,8 +18,75 @@ def convert_DEA_2_XYZ(d, e, a):
 
     return np.stack((x, y, z), axis=1)
 
+def convert_Velodyne_DEA_2_XYZ(d, e, a):
+    """
+    e and a are defined in the camera frame with z-axis pointing forward.
+    """
+
+    dc = d * np.cos( e/180.0*np.pi )
+    x = dc * np.sin( a/180.0*np.pi )
+    y = dc * np.cos( a/180.0*np.pi )
+    z = d * np.sin( e/180.0*np.pi )
+
+    return np.stack((x, y, z), axis=1)
+
+def convert_DEA_from_camera_2_Velodyne(d, e, a):
+    """
+    e, and a are defined in the camera frame with z-axis pointing forward.
+    Velodyne has its y-axis pointing forward. Both of these devices have
+    the x-axis pointing to the right.
+
+    For Velodyne, a is measured from y-axis to x-axis. e is measured from 
+    the xy-plane to z-axis.
+    """
+
+    return copy.deepcopy(d), -e, copy.deepcopy(a)
+
+class LIDARDescription(object):
+    def __init__(self, desc=None):
+        super(LIDARDescription, self).__init__()
+
+        self.desc = desc
+
+VELODYNE_VLP_32C = LIDARDescription( \
+    [ \
+        { "id":  0, "E":-25,     "flagFlip":True, "resA": 0.1, "offA":  1.4 },
+        { "id":  1, "E":-1,      "flagFlip":True, "resA": 0.1, "offA": -4.2 },
+        { "id":  2, "E":-1.667,  "flagFlip":True, "resA": 0.1, "offA":  1.4 },
+        { "id":  3, "E":-15.639, "flagFlip":True, "resA": 0.1, "offA": -1.4 },
+        { "id":  4, "E":-11.31,  "flagFlip":True, "resA": 0.1, "offA":  1.4 },
+        { "id":  5, "E": 0,      "flagFlip":True, "resA": 0.1, "offA": -1.4 },
+        { "id":  6, "E":-0.667,  "flagFlip":True, "resA": 0.1, "offA":  4.2 },
+        { "id":  7, "E":-8.843,  "flagFlip":True, "resA": 0.1, "offA": -1.4 },
+        { "id":  8, "E":-7.254,  "flagFlip":True, "resA": 0.1, "offA":  1.4 },
+        { "id":  9, "E": 0.333,  "flagFlip":True, "resA": 0.1, "offA": -4.2 },
+        { "id": 10, "E":-0.333,  "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
+        { "id": 11, "E":-6.148,  "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
+        { "id": 12, "E":-5.333,  "flagFlip":True, "resA": 0.1, "offA":  4.2 }, 
+        { "id": 13, "E": 1.333,  "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
+        { "id": 14, "E": 0.667,  "flagFlip":True, "resA": 0.1, "offA":  4.2 }, 
+        { "id": 15, "E":-4,      "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
+        { "id": 16, "E":-4.667,  "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
+        { "id": 17, "E": 1.667,  "flagFlip":True, "resA": 0.1, "offA": -4.2 }, 
+        { "id": 18, "E": 1,      "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
+        { "id": 19, "E":-3.667,  "flagFlip":True, "resA": 0.1, "offA": -4.2 }, 
+        { "id": 20, "E":-3.333,  "flagFlip":True, "resA": 0.1, "offA":  4.2 }, 
+        { "id": 21, "E": 3.333,  "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
+        { "id": 22, "E": 2.333,  "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
+        { "id": 23, "E":-2.667,  "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
+        { "id": 24, "E":-3,      "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
+        { "id": 25, "E": 7,      "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
+        { "id": 26, "E": 4.667,  "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
+        { "id": 27, "E":-2.333,  "flagFlip":True, "resA": 0.1, "offA": -4.2 }, 
+        { "id": 28, "E":-2,      "flagFlip":True, "resA": 0.1, "offA":  4.2 }, 
+        { "id": 29, "E": 15,     "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
+        { "id": 30, "E": 10.333, "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
+        { "id": 31, "E":-1.333,  "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
+         ] )
+
 class ScanlineParams(object):
-    def __init__(self, f, height, a=None, e=None, h=None, bx0=None, bx1=None, by0=None, by1=None, t=None):
+    def __init__( self, f, height, a=None, e=None, h=None, bx0=None, bx1=None, by0=None, by1=None, tx=None, ty=None, \
+            w00=None, w01=None, w10=None, w11=None ):
         super(ScanlineParams, self).__init__()
 
         self.f = f
@@ -28,7 +99,13 @@ class ScanlineParams(object):
         self.bx1 = bx1
         self.by0 = by0
         self.by1 = by1
-        self.t   = t
+        self.tx  = tx
+        self.ty  = ty
+
+        self.w00 = w00
+        self.w01 = w01
+        self.w10 = w10
+        self.w11 = w11
     
     def check_interval(self, interval):
         """
@@ -88,7 +165,7 @@ class ScanlineParams(object):
         if ( not self.check_interval(bx1) ):
             raise Exception("bx1 has bad interval.")
 
-        t = p - bx0
+        tx = p - bx0
 
         if ( bx0[0] < 0 or bx1[-1] >= self.width ):
             raise Exception("bx0[0] = %f, bx1[-1] = %f. " % ( bx0[0], bx1[-1] ))
@@ -99,8 +176,18 @@ class ScanlineParams(object):
         by0 = np.floor(p)
         by1 = np.ceil(p)
 
+        ty = p - by0
+
         if ( by0[0] < 0 or by1[-1] >= self.height ):
             raise Exception("by0[0] = %f, by1[-1] = %f. " % ( by0[0], by1[-1] ))
+
+        self.tx  = tx
+        self.ty  = ty
+
+        self.w00 = ( 1.0 - self.tx ) * ( 1.0 - self.ty )
+        self.w01 = self.tx * ( 1.0 - self.ty )
+        self.w10 = ( 1.0 - self.tx ) * self.ty
+        self.w11 = self.tx * self.ty
 
         self.a   = a
         self.e   = np.tile(E, [N])
@@ -108,7 +195,6 @@ class ScanlineParams(object):
         self.bx1 = bx1.astype(np.int)
         self.by0 = by0.astype(np.int)
         self.by1 = by1.astype(np.int)
-        self.t   = t
 
 class SimulatedLIDAR(object):
     def __init__(self, f, h, desc=None):
@@ -155,16 +241,18 @@ class SimulatedLIDAR(object):
         """
 
         # Get the depth for the bounds.
-        dB0 = depth[ sp.by0, sp.bx0 ]
-        dB1 = depth[ sp.by1, sp.bx1 ]
+        dB00 = depth[ sp.by0, sp.bx0 ]
+        dB01 = depth[ sp.by0, sp.bx1 ]
+        dB10 = depth[ sp.by1, sp.bx0 ]
+        dB11 = depth[ sp.by1, sp.bx1 ]
 
         # Interpolate.
-        d = dB0 + sp.t * ( dB1 - dB0 )
+        d =  sp.w00 * dB00 + sp.w01 * dB01 + sp.w10 * dB10 + sp.w11 * dB11
 
         # Distance.
-        dist = self.convert_depth_2_distance( sp.bx0 + sp.t , sp.by0 + sp.t, d )
+        dist = self.convert_depth_2_distance( sp.bx0 + sp.tx , sp.by0 + sp.ty, d )
 
-        return dist, copy.deepcopy(sp.e), copy.deepcopy(sp.a) + aShift
+        return dist, copy.deepcopy(sp.e), sp.a + aShift
 
     def extract(self, depthList):
         """
@@ -201,46 +289,42 @@ class SimulatedLIDAR(object):
 
         return lidarPoints
 
-if __name__ == "__main__":
+def save_LIDAR_poinst(fn, desc, lidarPoints, flagXYZ=False):
+    """
+    fn: Filename, without the extension.
+    desc: The description object.
+    lidarPoints: The list of LIDAR points.
+    """
+
+    if ( len(desc.desc) != len(lidarPoints) ):
+        raise Exception("len(desc.desc) != len(p), len(desc.desc) = %d, len(p) = %d. " % ( len(desc.desc), len(lidarPoints) ))
+
+    if ( flagXYZ ):
+        xyzList = []
+
+        for p in lidarPoints:
+            xyzList.append( convert_DEA_2_XYZ( p[:, 0], p[:, 1], p[:, 2] ) )
+        
+        points = np.concatenate( xyzList, axis=0 )
+    else:
+        points = np.concatenate( lidarPoints, axis=0 )
+
+    # Get all the IDs.
+    ids = []
+    for d in desc.desc:
+        ids.append( d["id"] )
+
+    ids = np.array(ids, dtype=np.int)
+
+    # Save the file.
+    outFn = "%s.npz" % (fn)
+    np.savez(outFn, points=points, ids=ids, flagXYZ=flagXYZ)
+
+def test_dummy_object():
     import SimplePLY
 
-    print("Test SimulatedLIDAR.")
-
     sld = SimulatedLIDAR( 580, 768 )
-    sld.set_description( [ \
-        { "id":  0, "E":-25,     "flagFlip":True, "resA": 0.1, "offA":  1.4 },
-        { "id":  1, "E":-1,      "flagFlip":True, "resA": 0.1, "offA": -4.2 },
-        { "id":  2, "E":-1.667,  "flagFlip":True, "resA": 0.1, "offA":  1.4 },
-        { "id":  3, "E":-15.639, "flagFlip":True, "resA": 0.1, "offA": -1.4 },
-        { "id":  4, "E":-11.31,  "flagFlip":True, "resA": 0.1, "offA":  1.4 },
-        { "id":  5, "E": 0,      "flagFlip":True, "resA": 0.1, "offA": -1.4 },
-        { "id":  6, "E":-0.667,  "flagFlip":True, "resA": 0.1, "offA":  4.2 },
-        { "id":  7, "E":-8.843,  "flagFlip":True, "resA": 0.1, "offA": -1.4 },
-        { "id":  8, "E":-7.254,  "flagFlip":True, "resA": 0.1, "offA":  1.4 },
-        { "id":  9, "E": 0.333,  "flagFlip":True, "resA": 0.1, "offA": -4.2 },
-        { "id": 10, "E":-0.333,  "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
-        { "id": 11, "E":-6.148,  "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
-        { "id": 12, "E":-5.333,  "flagFlip":True, "resA": 0.1, "offA":  4.2 }, 
-        { "id": 13, "E": 1.333,  "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
-        { "id": 14, "E": 0.667,  "flagFlip":True, "resA": 0.1, "offA":  4.2 }, 
-        { "id": 15, "E":-4,      "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
-        { "id": 16, "E":-4.667,  "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
-        { "id": 17, "E": 1.667,  "flagFlip":True, "resA": 0.1, "offA": -4.2 }, 
-        { "id": 18, "E": 1,      "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
-        { "id": 19, "E":-3.667,  "flagFlip":True, "resA": 0.1, "offA": -4.2 }, 
-        { "id": 20, "E":-3.333,  "flagFlip":True, "resA": 0.1, "offA":  4.2 }, 
-        { "id": 21, "E": 3.333,  "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
-        { "id": 22, "E": 2.333,  "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
-        { "id": 23, "E":-2.667,  "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
-        { "id": 24, "E":-3,      "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
-        { "id": 25, "E": 7,      "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
-        { "id": 26, "E": 4.667,  "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
-        { "id": 27, "E":-2.333,  "flagFlip":True, "resA": 0.1, "offA": -4.2 }, 
-        { "id": 28, "E":-2,      "flagFlip":True, "resA": 0.1, "offA":  4.2 }, 
-        { "id": 29, "E": 15,     "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
-        { "id": 30, "E": 10.333, "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
-        { "id": 31, "E":-1.333,  "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
-         ] )
+    sld.set_description( VELODYNE_VLP_32C.desc )
 
     sld.initialize()
 
@@ -256,6 +340,68 @@ if __name__ == "__main__":
     for p in lidarPoints:
         xyzList.append( convert_DEA_2_XYZ( p[:, 0], p[:, 1], p[:, 2] ) )
 
-    xyz  = np.concatenate( xyzList, axis=0 ) 
+    xyz = np.concatenate( xyzList, axis=0 ) 
 
     SimplePLY.output_to_ply( "./DummyLidar.ply", xyz.transpose(), [ len(xyzList), xyzList[0].shape[0]], 1000, np.array([0, 0, 0]).reshape((-1,1)) )
+
+def test_with_depth_file(inputFn):
+    import SimplePLY
+    import os
+
+    sld = SimulatedLIDAR( 580, 768 )
+    sld.set_description( VELODYNE_VLP_32C.desc )
+
+    sld.initialize()
+
+    depths = np.load(inputFn)
+
+    if ( len( depths.files ) != 4 ):
+        raise Exception("depths.files = {}. ".format( depths.files ) )
+
+    depthList = [ depths["d0"], depths["d1"], depths["d2"], depths["d3"] ]
+    # depthList = [ depths["d0"] ]
+
+    lidarPoints = sld.extract( depthList )
+
+    # Output preparation.
+    parts = os.path.split(inputFn)
+
+    # Save the lidar points.
+    save_LIDAR_poinst( "%s/ExtractedLIDARPoints" % ( parts[0] ), VELODYNE_VLP_32C, lidarPoints )
+    save_LIDAR_poinst( "%s/ExtractedLIDARPointsXYZ" % ( parts[0] ), VELODYNE_VLP_32C, lidarPoints, flagXYZ=True )
+
+    xyzList = []
+
+    for p in lidarPoints:
+        xyzList.append( convert_DEA_2_XYZ( p[:, 0], p[:, 1], p[:, 2] ) )
+
+    xyz = np.concatenate( xyzList, axis=0 ) 
+
+    SimplePLY.output_to_ply( "%s/ExtractedLIDARPoints.ply"  % ( parts[0] ), xyz.transpose(), [ len(xyzList), xyzList[0].shape[0]], 50, np.array([0, 0, 0]).reshape((-1,1)) )
+
+    # Velodyne frame.
+    xyzList = []
+
+    for p in lidarPoints:
+        d, e, a = convert_DEA_from_camera_2_Velodyne( p[:, 0], p[:, 1], p[:, 2] )
+        xyzList.append( convert_Velodyne_DEA_2_XYZ( d, e, a ) )
+
+    xyz = np.concatenate( xyzList, axis=0 ) 
+
+    SimplePLY.output_to_ply( "%s/ExtractedLIDARPoints_Velodyne.ply" % ( parts[0] ), xyz.transpose(), [ len(xyzList), xyzList[0].shape[0]], 50, np.array([0, 0, 0]).reshape((-1,1)) )
+
+if __name__ == "__main__":
+    print("Test SimulatedLIDAR.")
+
+    parser = argparse.ArgumentParser(description="Test SimulatedLIDAR.")
+
+    parser.add_argument("--input", type=str, default="", \
+        help="The input npz file. Leave blank for not testing.")
+
+    args = parser.parse_args()
+
+    # test_dummy_object()
+
+    if ( args.input != "" ):
+        print("Test with %s. " % ( args.input ))
+        test_with_depth_file( args.input )

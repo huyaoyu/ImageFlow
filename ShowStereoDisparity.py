@@ -96,6 +96,14 @@ def visualize_disparity_KITTI(disp, fn, maxDisp=None):
     cv2.imshow("disp", disp)
     cv2.waitKey()
 
+def visualize_depth_as_disparity(depth, BF, mask=None, outDir=None, outName=None, maxDepth=None, waitTime=None, flagShowFigure=True, maxHue=179, n=8):
+    if ( maxDepth is None ):
+        BFMaxDepth = None
+    else:
+        BFMaxDepth = BF/maxDepth
+    
+    visualize_disparity_HSV( BF/depth, mask, outDir, outName, BFMaxDepth, waitTime, flagShowFigure, maxHue, n )
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Visualize an disparity.')
 
