@@ -104,35 +104,71 @@ def visualize_depth_as_disparity(depth, BF, mask=None, outDir=None, outName=None
     
     visualize_disparity_HSV( BF/depth, mask, outDir, outName, BFMaxDepth, waitTime, flagShowFigure, maxHue, n )
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Visualize an disparity.')
+class Args(object):
+    def __init__(self, disp):
+        super(Args, self).__init__()
 
-    parser.add_argument("disp", type=str, \
-        help="The filename of the disparity.")
+        self.disp                  = disp
+        self.mask                  = ""
+        self.ignore_fov_mask       = False
+        self.ignore_cross_occ_mask = False
+        self.ignore_self_occ_mask  = False
+        self.ignore_all_occ_mask   = False
+        self.write_dir             = ""
+        self.style                 = "kitti"
+        self.not_show              = False
 
-    parser.add_argument("--mask", type=str, default="", \
-        help="The filename of the mask")
-    
-    parser.add_argument("--ignore-fov-mask", action="store_true", default=False, \
-        help="Ignore the out-of-FOV mask label.")
-    
-    parser.add_argument("--ignore-cross-occ-mask", action="store_true", default=False, \
-        help="Ignore the cross-ossclusion mask label.")
+    def copy_args(self, args):
+        self.disp                  = args.disp
+        self.mask                  = args.mask
+        self.ignore_fov_mask       = args.ignore_fov_mask
+        self.ignore_cross_occ_mask = args.ignore_cross_occ_mask
+        self.ignore_self_occ_mask  = args.ignore_self_occ_mask
+        self.ignore_all_occ_mask   = args.ignore_all_occ_mask
+        self.write_dir             = args.write_dir
+        self.style                 = args.style
+        self.not_show              = args.not_show
 
-    parser.add_argument("--ignore-self-occ-mask", action="store_true", default=False, \
-        help="Ignore the self-occlusion mask label.")
+    def make_parser(self):
+        parser = argparse.ArgumentParser(description='Visualize an disparity.')
 
-    parser.add_argument("--ignore-all-occ-mask", action="store_true", default=False, \
-        help="Equivalent to setting --ignore-self-occ-mask and --ignore-self-occ-mask at the same time.")
-    
-    parser.add_argument("--write-dir", type=str, default="", \
-        help="Specify this argument for writing images to the file system. The file name will be determined with respect to the input file.")
+        parser.add_argument("disp", type=str, \
+            help="The filename of the disparity.")
 
-    parser.add_argument("--style", type=str, default="kitti", \
-        help="Use kitti, hsv, gray to choose style.")
+        parser.add_argument("--mask", type=str, default="", \
+            help="The filename of the mask")
+        
+        parser.add_argument("--ignore-fov-mask", action="store_true", default=False, \
+            help="Ignore the out-of-FOV mask label.")
+        
+        parser.add_argument("--ignore-cross-occ-mask", action="store_true", default=False, \
+            help="Ignore the cross-ossclusion mask label.")
 
-    args = parser.parse_args()
+        parser.add_argument("--ignore-self-occ-mask", action="store_true", default=False, \
+            help="Ignore the self-occlusion mask label.")
 
+        parser.add_argument("--ignore-all-occ-mask", action="store_true", default=False, \
+            help="Equivalent to setting --ignore-self-occ-mask and --ignore-self-occ-mask at the same time.")
+        
+        parser.add_argument("--write-dir", type=str, default="", \
+            help="Specify this argument for writing images to the file system. The file name will be determined with respect to the input file.")
+
+        parser.add_argument("--style", type=str, default="kitti", \
+            help="Use kitti, hsv, gray to choose style.")
+
+        parser.add_argument("--not-show", action="store_true", default=False, \
+            help="Set this flag to disable showing the figure.")
+
+        return parser
+
+    def parse_args(self, parser):
+        args = parser.parse_args()
+
+        self.copy_args(args)
+
+        return args
+
+def run(args):
     # Open the disparity file.
     disp = np.load(args.disp).astype(NP_FLOAT)
 
@@ -201,3 +237,10 @@ if __name__ == "__main__":
 
         cv2.imshow(outName, dispN)
         cv2.waitKey()
+
+if __name__ == "__main__":
+    args = Args(None)
+    parser = args.make_parser()
+    args.parse_args(parser)
+
+    run(args)

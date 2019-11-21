@@ -1,6 +1,7 @@
 from __future__ import print_function
 
 import json
+import math
 import numpy as np
 import os
 
@@ -76,3 +77,20 @@ def create_pose_id_file(dataDir, imgDir, pattern, poseFileName):
     # Create dummy args.
     args = DummyArgs(dataDir, imgDir, pattern, out_file=poseFileName, silent=True)
     generate_pose_name_json(args)
+
+def reshape_idx_array(idxArray):
+    N = idxArray.size
+    idxArray = idxArray.astype(np.int)
+
+    # Find the closest squre root.
+    s = int(math.ceil(math.sqrt(N)))
+
+    # Create a new index array.
+    idx2D = np.zeros( (s*s, ), dtype=np.int ) + idxArray.max()
+    idx2D[:N] = idxArray
+
+    # Reshape and transpose.
+    idx2D = idx2D.reshape((s, s)).transpose()
+
+    # Flatten again.
+    return idx2D.reshape((-1, ))

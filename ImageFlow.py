@@ -1057,23 +1057,6 @@ def worker(name, jq, rq, lq, p, inputParams, args):
     
     lq.put("%s: Done with %d jobs." % (name, count))
 
-def reshape_idx_array(idxArray):
-    N = idxArray.size
-    idxArray = idxArray.astype(np.int)
-
-    # Find the closest squre root.
-    s = int(math.ceil(math.sqrt(N)))
-
-    # Create a new index array.
-    idx2D = np.zeros( (s*s, ), dtype=np.int ) + idxArray.max()
-    idx2D[:N] = idxArray
-
-    # Reshape and transpose.
-    idx2D = idx2D.reshape((s, s)).transpose()
-
-    # Flatten again.
-    return idx2D.reshape((-1, ))
-
 def process_report_queue(rq):
     """
     rq: A Queue object containing the report data.
@@ -1175,7 +1158,7 @@ if __name__ == "__main__":
     idxArray = np.array(idxList, dtype=np.int)
 
     # Reshape the idxArray.
-    idxArrayR = reshape_idx_array(idxArray)
+    idxArrayR = WD.reshape_idx_array(idxArray)
 
     # Test the output directory.
     outDir = inputParams["dataDir"] + "/" + inputParams["outDir"]
