@@ -47,7 +47,7 @@ def visualize_disparity_HSV(disp, mask=None, outDir=None, outName=None, maxDisp=
 
     return key
 
-def visualize_disparity_KITTI(disp, fn, maxDisp=None):
+def visualize_disparity_KITTI(disp, fn, maxDisp=None, flagShowFigure=True):
     """
     This function is the reproduction of the MATLAB code provided
     by the KITTI dataset.
@@ -93,8 +93,9 @@ def visualize_disparity_KITTI(disp, fn, maxDisp=None):
     
     disp = disp.reshape((h, w, 3)).astype(np.uint8)
 
-    cv2.imshow("disp", disp)
-    cv2.waitKey()
+    if ( flagShowFigure ):
+        cv2.imshow("disp", disp)
+        cv2.waitKey()
 
 def visualize_depth_as_disparity(depth, BF, mask=None, outDir=None, outName=None, maxDepth=None, waitTime=None, flagShowFigure=True, maxHue=179, n=8):
     if ( maxDepth is None ):
@@ -117,6 +118,7 @@ class Args(object):
         self.write_dir             = ""
         self.style                 = "kitti"
         self.not_show              = False
+        self.color_max_disp        = 0
 
     def copy_args(self, args):
         self.disp                  = args.disp
@@ -128,6 +130,7 @@ class Args(object):
         self.write_dir             = args.write_dir
         self.style                 = args.style
         self.not_show              = args.not_show
+        self.color_max_disp        = args.color_max_disp
 
     def make_parser(self):
         parser = argparse.ArgumentParser(description='Visualize an disparity.')
@@ -158,6 +161,9 @@ class Args(object):
 
         parser.add_argument("--not-show", action="store_true", default=False, \
             help="Set this flag to disable showing the figure.")
+
+        parser.add_argument("--color-max-disp", type=float, default=0, \
+            help="The maximum disparity for color rendering. Set 0 to disable. Have no effect for grayscale figures.")
 
         return parser
 
@@ -218,16 +224,28 @@ def run(args):
     tempMask = mask != 255
     disp[tempMask] = 0.0
 
+    print("disp.max() = %f. " % ( disp.max() ))
+
     outFn = "%s/%s.png" % ( outDir, outName )
+
+    flagShowFigure = True
+    if ( args.not_show ):
+        flagShowFigure = False
+
+    colorMaxDisp = None
+    if ( args.color_max_disp > 0 ):
+        colorMaxDisp = args.color_max_disp
 
     # Show the image.
     if ( args.style == "kitti" ):
-        dispN = visualize_disparity_KITTI( disp, outFn )
+        dispN = visualize_disparity_KITTI( disp, outFn, \
+            maxDisp=colorMaxDisp, flagShowFigure=flagShowFigure )
 
         cv2.imshow(outName, dispN)
         cv2.waitKey()
     elif ( args.style == "hsv" ):
-        visualize_disparity_HSV( disp, mask, outDir, outName, maxHue=159 )
+        visualize_disparity_HSV( disp, mask, outDir, outName, \
+            maxDisp=colorMaxDisp, flagShowFigure=flagShowFigure, maxHue=159 )
     else:
         dispN = normalize_float_image( disp, 255 ).astype(np.uint8)
 
@@ -235,8 +253,9 @@ def run(args):
         if ( "" != args.write_dir ):
             save_float_image_PNG( outFn, disp )
 
-        cv2.imshow(outName, dispN)
-        cv2.waitKey()
+        if ( flagShowFigure ):
+            cv2.imshow(outName, dispN)
+            cv2.waitKey()
 
 if __name__ == "__main__":
     args = Args(None)
