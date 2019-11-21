@@ -409,15 +409,15 @@ def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, D=1000, p=
             continue
 
         showDetail = False
-        if ( iy == 8 and ix == 342 ):
-            showDetail = True
+        # if ( iy == 323 and ix == 129 ):
+        #     showDetail = True
 
-        # if ( iu == 282 and iv == 123 ):
+        # if ( iv == 302 and iu == 148 ):
         #     showDetail = True
 
         if ( showDetail ):
             print("iy = %d, ix = %d. " % ( iy, ix ))
-            print("iu = %d, iv = %d. " % ( iu, iv ))
+            print("iv = %d, iu = %d. " % ( iv, iu ))
 
         # Get the current depth.
         d0, ddMin0, ddMax0, coor0 = get_distance_from_coordinate_table(x01, h, w, iy, ix, showDetail)
@@ -493,6 +493,7 @@ def create_warp_masks(imageSize, x01, x1, u, v, cam_0, cam_1, M0, M1, D=1000, p=
             print("d0 = %f, dr = %f. " % ( d0, dr ))
             print("coor0 = {}. ".format( coor0 ))
             if ( np.isfinite(opIndex) ):
+                print("coorR = {}. ".format( coorR ))
                 print("normals01[{}] = {}. ".format( i, normals01[i] ))
                 print("normals01[{}] = {}. ".format( opIndex, normals01[opIndex] ))
                 print("v01 = {}. ".format( v01 ))

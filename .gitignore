@@ -14,4 +14,6 @@ sample/ImageFlow_Backup/
 TestXInput.json
 TestYawInput.json
 gascola_yaw_512.json
+*.npz
+*.npy
 

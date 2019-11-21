@@ -42,6 +42,13 @@ def convert_DEA_from_camera_2_Velodyne(d, e, a):
 
     return copy.deepcopy(d), -e, copy.deepcopy(a)
 
+def convert_DEA_from_camera_2_Velodyne_XYZ(d, e, a):
+    d, e, a = convert_DEA_from_camera_2_Velodyne(d, e, a)
+    return convert_Velodyne_DEA_2_XYZ(d, e, a)
+
+def convert_lidar_point_list_2_array(pointList):
+    return np.concatenate( pointList, axis=0 ) 
+
 class LIDARDescription(object):
     def __init__(self, desc=None):
         super(LIDARDescription, self).__init__()
@@ -85,7 +92,8 @@ VELODYNE_VLP_32C = LIDARDescription( \
          ] )
 
 class ScanlineParams(object):
-    def __init__( self, f, height, a=None, e=None, h=None, bx0=None, bx1=None, by0=None, by1=None, tx=None, ty=None, \
+    def __init__( self, f, height, a=None, e=None, h=None, \
+            bx0=None, bx1=None, by0=None, by1=None, tx=None, ty=None, idxX=None, idxY=None, \
             w00=None, w01=None, w10=None, w11=None ):
         super(ScanlineParams, self).__init__()
 
@@ -101,6 +109,8 @@ class ScanlineParams(object):
         self.by1 = by1
         self.tx  = tx
         self.ty  = ty
+        self.idxX = idxX
+        self.idxY = idxY
 
         self.w00 = w00
         self.w01 = w01
@@ -196,8 +206,12 @@ class ScanlineParams(object):
         self.by0 = by0.astype(np.int)
         self.by1 = by1.astype(np.int)
 
+        # Find the closet index for the LIDAR point.
+        self.idxX = np.round( self.bx0 + self.tx ).astype(np.int)
+        self.idxY = np.round( self.by0 + self.ty ).astype(np.int)
+
 class SimulatedLIDAR(object):
-    def __init__(self, f, h, desc=None):
+    def __init__(self, f, h, desc=None, varThreshold=None):
         super(SimulatedLIDAR, self).__init__()
 
         self.f = f 
@@ -205,9 +219,18 @@ class SimulatedLIDAR(object):
         self.h = h
         self.desc = None
         self.scanlines = []
+        self.varThreshold = varThreshold
 
     def set_description(self, desc):
         self.desc = desc
+    
+    def set_variance_threshold(self, vt):
+        assert vt > 0
+
+        self.varThreshold = vt
+
+    def clear_variance_threshold(self):
+        self.varThreshold = None
 
     def initialize(self):
         if ( self.desc is None ):
@@ -254,7 +277,43 @@ class SimulatedLIDAR(object):
 
         return dist, copy.deepcopy(sp.e), sp.a + aShift
 
-    def extract(self, depthList):
+    def extract_single_with_vt(self, depth, aShift, sp):
+        """
+        depth: The 2D depth image.
+        aShift: The shift of azimuthal angle for this depth image.
+        sp: A ScanlineParams object.
+        """
+
+        if ( self.varThreshold is None ):
+            raise Exception("self.varThreshold is None")
+
+        # Get the depth for the bounds.
+        dB00 = depth[ sp.by0, sp.bx0 ]
+        dB01 = depth[ sp.by0, sp.bx1 ]
+        dB10 = depth[ sp.by1, sp.bx0 ]
+        dB11 = depth[ sp.by1, sp.bx1 ]
+
+        # Interpolate.
+        d =  sp.w00 * dB00 + sp.w01 * dB01 + sp.w10 * dB10 + sp.w11 * dB11
+
+        # Stack the bounds.
+        B = np.stack( (dB00, dB01, dB10, dB11), axis=-1 )
+
+        # Find the variance of B.
+        vb = np.var( B, axis=-1 )
+
+        # Find the vaiance over the threshold.
+        mask = vb > self.varThreshold
+
+        # Find the indices.
+        d[mask] = depth[ sp.idxY[mask], sp.idxX[mask] ]
+
+        # Distance.
+        dist = self.convert_depth_2_distance( sp.bx0 + sp.tx , sp.by0 + sp.ty, d )
+
+        return dist, copy.deepcopy(sp.e), sp.a + aShift
+
+    def extract(self, depthList, maxDist=None):
         """
         depthList is a 4-element list. Contains the depth image in the order of 
         increasing azimuthal angle.
@@ -272,7 +331,13 @@ class SimulatedLIDAR(object):
 
             for depth in depthList:
                 # Extract from this depth image.
-                d, e, a = self.extract_single( depth, aShift, sp )
+                if ( self.varThreshold is not None ):
+                    d, e, a = self.extract_single_with_vt( depth, aShift, sp )
+                else:
+                    d, e, a = self.extract_single( depth, aShift, sp )
+
+                if ( maxDist is not None and maxDist > 0):
+                    d = np.clip(d, 0, maxDist)
 
                 distList.append( d )
                 eList.append( e )
@@ -344,8 +409,23 @@ def test_dummy_object():
 
     SimplePLY.output_to_ply( "./DummyLidar.ply", xyz.transpose(), [ len(xyzList), xyzList[0].shape[0]], 1000, np.array([0, 0, 0]).reshape((-1,1)) )
 
-def test_with_depth_file(inputFn):
+def save_points_as_ply(fn, xyz, lines, pointsPerLine, maxDistColor):
+    """
+    xyz must have a shape of 3xN.
+    """
+
     import SimplePLY
+
+    if ( 2 != len(xyz.shape) or xyz.shape[0] != 3 ):
+        raise Exception("xyz.shape = {}. ".format(xyz.shape))
+
+    assert lines > 0
+    assert pointsPerLine > 0
+    assert maxDistColor > 0
+
+    SimplePLY.output_to_ply( fn, xyz, [ lines, pointsPerLine], maxDistColor, np.array([0, 0, 0]).reshape((-1,1)) )
+
+def test_with_depth_file(inputFn):
     import os
 
     sld = SimulatedLIDAR( 580, 768 )
@@ -388,7 +468,8 @@ def test_with_depth_file(inputFn):
 
     xyz = np.concatenate( xyzList, axis=0 ) 
 
-    SimplePLY.output_to_ply( "%s/ExtractedLIDARPoints_Velodyne.ply" % ( parts[0] ), xyz.transpose(), [ len(xyzList), xyzList[0].shape[0]], 50, np.array([0, 0, 0]).reshape((-1,1)) )
+    # SimplePLY.output_to_ply( "%s/ExtractedLIDARPoints_Velodyne.ply" % ( parts[0] ), xyz.transpose(), [ len(xyzList), xyzList[0].shape[0]], 50, np.array([0, 0, 0]).reshape((-1,1)) )
+    save_points_as_ply( "%s/ExtractedLIDARPoints_Velodyne.ply" % ( parts[0] ), xyz.transpose(), len(xyzList), xyzList[0].shape[0], 50 )
 
 if __name__ == "__main__":
     print("Test SimulatedLIDAR.")
