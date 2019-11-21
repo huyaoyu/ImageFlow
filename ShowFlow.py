@@ -93,44 +93,86 @@ def plot_vector_field(du, dv, mask=None, outDir=None, outName="bgr", magFactor=1
     plt.show()
     # plt.pause(0.001)
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Visualize an optical flow.')
+class Args(object):
+    def __init__(self, flow):
+        super(Args, self).__init__()
 
-    parser.add_argument("flow", type=str, \
-        help="The filename of the flow.")
+        self.flow                  = flow
+        self.mask                  = ""
+        self.mf                    = 1.0
+        self.ignore_fov_mask       = False
+        self.ignore_cross_occ_mask = False
+        self.ignore_self_occ_mask  = False
+        self.ignore_all_occ_mask   = False
+        self.write_dir             = ""
+        self.kitti                 = False
+        self.max_f                 = 0
+        self.vector                = False
+        self.not_show              = False
 
-    parser.add_argument("--mask", type=str, default="", \
-        help="The filename of the mask")
-    
-    parser.add_argument("--mf", type=float, default=1.0, \
-        help="The amplification factor.")
-    
-    parser.add_argument("--ignore-fov-mask", action="store_true", default=False, \
-        help="Ignore the out-of-FOV mask label.")
-    
-    parser.add_argument("--ignore-cross-occ-mask", action="store_true", default=False, \
-        help="Ignore the cross-ossclusion mask label.")
+    def copy_args(self, args):
+        self.flow                  = args.flow
+        self.mask                  = args.mask
+        self.mf                    = args.mf
+        self.ignore_fov_mask       = args.ignore_fov_mask
+        self.ignore_cross_occ_mask = args.ignore_cross_occ_mask
+        self.ignore_self_occ_mask  = args.ignore_self_occ_mask
+        self.ignore_all_occ_mask   = args.ignore_all_occ_mask
+        self.write_dir             = args.write_dir
+        self.kitti                 = args.kitti
+        self.max_f                 = args.max_f
+        self.vector                = args.vector
+        self.not_show              = args.not_show
 
-    parser.add_argument("--ignore-self-occ-mask", action="store_true", default=False, \
-        help="Ignore the self-occlusion mask label.")
+    def make_parser(self):
+        parser = argparse.ArgumentParser(description='Visualize an optical flow.')
 
-    parser.add_argument("--ignore-all-occ-mask", action="store_true", default=False, \
-        help="Equivalent to setting --ignore-self-occ-mask and --ignore-self-occ-mask at the same time.")
-    
-    parser.add_argument("--write-dir", type=str, default="", \
-        help="Specify this argument for writing images to the file system. The file name will be determined with respect to the input file.")
+        parser.add_argument("flow", type=str, \
+            help="The filename of the flow.")
 
-    parser.add_argument("--kitti", action="store_true", default=False, \
-        help="Show the image similary to KITTI dataset.")
+        parser.add_argument("--mask", type=str, default="", \
+            help="The filename of the mask")
+        
+        parser.add_argument("--mf", type=float, default=1.0, \
+            help="The amplification factor.")
+        
+        parser.add_argument("--ignore-fov-mask", action="store_true", default=False, \
+            help="Ignore the out-of-FOV mask label.")
+        
+        parser.add_argument("--ignore-cross-occ-mask", action="store_true", default=False, \
+            help="Ignore the cross-ossclusion mask label.")
 
-    parser.add_argument("--max-f", type=float, default=0, \
-        help="The max optical flow value for KITTI.")
-    
-    parser.add_argument("--vector", action="store_true", default=False, \
-        help="Plot the vector field.")
+        parser.add_argument("--ignore-self-occ-mask", action="store_true", default=False, \
+            help="Ignore the self-occlusion mask label.")
 
-    args = parser.parse_args()
+        parser.add_argument("--ignore-all-occ-mask", action="store_true", default=False, \
+            help="Equivalent to setting --ignore-self-occ-mask and --ignore-self-occ-mask at the same time.")
+        
+        parser.add_argument("--write-dir", type=str, default="", \
+            help="Specify this argument for writing images to the file system. The file name will be determined with respect to the input file.")
 
+        parser.add_argument("--kitti", action="store_true", default=False, \
+            help="Show the image similary to KITTI dataset.")
+
+        parser.add_argument("--max-f", type=float, default=0, \
+            help="The max optical flow value for KITTI.")
+        
+        parser.add_argument("--vector", action="store_true", default=False, \
+            help="Plot the vector field.")
+
+        parser.add_argument("--not-show", action="store_true", default=False, \
+            help="Set this flag to disable showing the images.")
+
+        return parser
+
+    def parse_args(self, parser):
+        args = parser.parse_args()
+
+        self.copy_args(args)
+
+        return args
+
+def run(args):
     # Open the flow file.
     flow = np.load(args.flow)
 
@@ -177,6 +219,11 @@ if __name__ == "__main__":
         outDir  = None
         outName = ""
 
+    if ( args.not_show ):
+        flagShow = False
+    else:
+        flagShow = True
+
     # Plot the vector field.
     if ( args.vector ):
         plot_vector_field( flow[:, :, 0], flow[:, :, 1], mask )
@@ -190,6 +237,13 @@ if __name__ == "__main__":
             else:
                 maxF = args.max_f
             
-            show_as_KITTI(a, d, maxF, 8, mask, outDir, outName, waitTime=None, hueMax=159)
+            show_as_KITTI(a, d, maxF, 8, mask, outDir, outName, waitTime=None, flagShowFigure=flagShow, hueMax=159)
         else:
-            show(a, d, mask, outDir, outName, waitTime=None, magFactor=args.mf, hueMax=159)
+            show(a, d, mask, outDir, outName, waitTime=None, flagShowFigure=flagShow, magFactor=args.mf, hueMax=159)
+
+if __name__ == "__main__":
+    args = Args(None)
+    parser = args.make_parser()
+    args.parse_args(parser)
+
+    run(args)
