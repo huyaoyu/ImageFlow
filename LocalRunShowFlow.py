@@ -27,6 +27,12 @@ if __name__ == "__main__":
     parser.add_argument("--kitti", action="store_true", default=False, \
         help="Use kitti style.")
 
+    parser.add_argument("--hue-max", type=int, default=159, \
+        help="The max hue value. Should be positive and under 180.")
+
+    parser.add_argument("--max-f", type=float, default=0, \
+        help="The max flow value for coloring. Should be positive. Set 0 to disable.")
+
     args = parser.parse_args()
 
     # Find all the files.
@@ -59,9 +65,10 @@ if __name__ == "__main__":
         sfArgs.ignore_all_occ_mask   = False
         sfArgs.write_dir             = "%s" % ( args.outdir )
         sfArgs.kitti                 = args.kitti
-        sfArgs.max_f                 = 0
+        sfArgs.max_f                 = args.max_f
         sfArgs.vector                = False
         sfArgs.not_show              = True
+        sfArgs.hue_max               = args.hue_max
 
         # Run ShowFlow.py.
         SFRun(sfArgs)

@@ -246,6 +246,9 @@ def run(args):
     elif ( args.style == "hsv" ):
         visualize_disparity_HSV( disp, mask, outDir, outName, \
             maxDisp=colorMaxDisp, flagShowFigure=flagShowFigure, maxHue=159 )
+
+        # visualize_disparity_HSV( disp, mask, outDir, outName, \
+        #     maxDisp=colorMaxDisp, flagShowFigure=flagShowFigure, maxHue=169 )
     else:
         dispN = normalize_float_image( disp, 255 ).astype(np.uint8)
 

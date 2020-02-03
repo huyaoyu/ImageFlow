@@ -109,6 +109,7 @@ class Args(object):
         self.max_f                 = 0
         self.vector                = False
         self.not_show              = False
+        self.hue_max               = 159
 
     def copy_args(self, args):
         self.flow                  = args.flow
@@ -123,6 +124,7 @@ class Args(object):
         self.max_f                 = args.max_f
         self.vector                = args.vector
         self.not_show              = args.not_show
+        self.hue_max               = args.hue_max
 
     def make_parser(self):
         parser = argparse.ArgumentParser(description='Visualize an optical flow.')
@@ -162,6 +164,9 @@ class Args(object):
 
         parser.add_argument("--not-show", action="store_true", default=False, \
             help="Set this flag to disable showing the images.")
+        
+        parser.add_argument("--hue-max", type=int, default=159, \
+            help="The max hue value. Should be positive and under 180.")
 
         return parser
 
@@ -237,9 +242,9 @@ def run(args):
             else:
                 maxF = args.max_f
             
-            show_as_KITTI(a, d, maxF, 8, mask, outDir, outName, waitTime=None, flagShowFigure=flagShow, hueMax=159)
+            show_as_KITTI(a, d, maxF, 8, mask, outDir, outName, waitTime=None, flagShowFigure=flagShow, hueMax=args.hue_max)
         else:
-            show(a, d, mask, outDir, outName, waitTime=None, flagShowFigure=flagShow, magFactor=args.mf, hueMax=159)
+            show(a, d, mask, outDir, outName, waitTime=None, flagShowFigure=flagShow, magFactor=args.mf, hueMax=args.hue_max)
 
 if __name__ == "__main__":
     args = Args(None)
