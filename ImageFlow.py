@@ -943,4 +943,4 @@ if __name__ == "__main__":
     print_max_warp_error( warpErrMaxEntry )
 
     if ( args.mf >= 0 ):
-        print( "Command line argument --mf %f overwrites the parameter \"imageMagnitudeFactor\" (%f) in the input JSON file.\n" % (mf, inputParams["imageMagnitudeFactor"]) )
+        print( "Command line argument --mf %f overwrites the parameter \"imageMagnitudeFactor\" (%f) in the input JSON file.\n" % (args.mf, inputParams["imageMagnitudeFactor"]) )

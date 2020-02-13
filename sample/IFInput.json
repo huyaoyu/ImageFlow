@@ -20,5 +20,6 @@
     "imageMagnitudeFactor": 1.0,
     "imageWaitTimeMS": 2000,
     "distanceRange": 10000,
-    "flagDegree": true
+    "flagDegree": true,
+    "warpErrorThreshold": 1
 }
