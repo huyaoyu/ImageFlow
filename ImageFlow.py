@@ -675,6 +675,28 @@ def load_pose_id_pose_data(params, args):
 
     return poseIDs, poseData
 
+def load_pose_id_pose_data_from_folder(params, args):
+    dataDir = params["dataDir"]
+
+    poseDataFn = dataDir + "/" + params["poseData"]
+    leftImgFn = dataDir + "/" + params["imageDir"]
+
+    imgfiles = os.listdir(leftImgFn)
+    poseIDs = [fn.split('_')[0] for fn in imgfiles if fn[-4:]==params["imageExt"]]
+    poseIDs.sort()
+
+    if ( ".txt" == os.path.splitext( os.path.split(poseDataFn)[1] )[1] ):
+        poseData = np.loadtxt( poseDataFn, dtype=NP_FLOAT )
+    else:
+        poseData = np.load( poseDataFn ).astype(NP_FLOAT)
+
+        if ( True == args.debug ):
+            np.savetxt( dataDir + "/poseData.dat", poseData, fmt="%+.4e" )
+
+    assert len(poseIDs) == len(poseData)
+
+    return poseIDs, poseData
+
 def calculate_angle_distance_from_du_dv(du, dv, flagDegree=False):
     a = np.arctan2( dv, du )
 
@@ -727,7 +749,7 @@ def print_max_warp_error(entry):
         raise Exception( "Wrong max warp error entry: idx: %d, poseIDs: %s - %s, mean error: %f. " % \
             ( entry["idx"], entry["poseID_0"], entry["poseID_1"], entry["warpErr"], entry["warpErr_01"] ) )
 
-def save_flow(fnBase, flowSuffix, maskSuffix, du, dv, maskOcc, maskFOV):
+def save_flow(fnBase, flowSuffix, maskSuffix, du, dv, maskOcc=None, maskFOV=None):
     """
     fnBase: The file name base.
     flowSuffix: Filename suffix of the optical flow file.
@@ -761,18 +783,20 @@ def save_flow(fnBase, flowSuffix, maskSuffix, du, dv, maskOcc, maskFOV):
     # Create a 1-channel NumPy array.
     mask = np.zeros_like(du, dtype=np.uint8) + 255
 
-    tempMask = maskOcc == CROSS_OCC
-    mask[tempMask] = CROSS_OCC
+    if ( maskOcc is not None ):
+        tempMask = maskOcc == CROSS_OCC
+        mask[tempMask] = CROSS_OCC
 
-    tempMask = maskOcc == SELF_OCC
-    mask[tempMask] = SELF_OCC
+        tempMask = maskOcc == SELF_OCC
+        mask[tempMask] = SELF_OCC
 
-    tempMask = maskFOV == OUT_OF_FOV_POSITIVE_Z
-    mask[tempMask] = OUT_OF_FOV_POSITIVE_Z
+    if ( maskFOV is not None ):
+        tempMask = maskFOV == OUT_OF_FOV_POSITIVE_Z
+        mask[tempMask] = OUT_OF_FOV_POSITIVE_Z
 
-    tempMask = maskFOV == OUT_OF_FOV_NEGATIVE_Z
-    mask[tempMask] = 0
-    flow[tempMask] = np.array([0.0, 0.0], dtype=NP_FLOAT)
+        tempMask = maskFOV == OUT_OF_FOV_NEGATIVE_Z
+        mask[tempMask] = 0
+        flow[tempMask] = np.array([0.0, 0.0], dtype=NP_FLOAT)
 
     # Save the files.
     np.save( "%s%s.npy" % (fnBase, flowSuffix), flow )
@@ -888,6 +912,9 @@ def process_single_process(name, outDir, \
     # Depth clipping.
     X_01C = clip_distance(X_01C, distanceRange)
     X1C   = clip_distance(X1C, distanceRange)
+
+    save_flow( "%s/%s" % (outDir, poseID_0), "_flow", "_mask", du, dv)
+    print("Flow saved.")
 
     # warp the image to see the result
     maskOcc, maskFOV, warppedImg, dImg1_00, dImg1_01, occupancyMask_00, occupancyMask_01 \
@@ -1142,7 +1169,8 @@ if __name__ == "__main__":
         print("Convert angle from radian to degree as demanded by the input file.")
 
     # Load the pose filenames and the pose data.
-    poseIDs, poseData = load_pose_id_pose_data( inputParams, args )
+    # poseIDs, poseData = load_pose_id_pose_data( inputParams, args )
+    poseIDs, poseData = load_pose_id_pose_data_from_folder( inputParams, args)
     print("poseData and poseFilenames loaded.")
 
     # Get the number of poseIDs.
@@ -1219,7 +1247,7 @@ if __name__ == "__main__":
         if ( idx_0 == maxIdx):
             continue
 
-        idx_1 = idx_0 + 1
+        idx_1 = idx_0 + idxStep
 
         # Get the poseIDs.
         poseID_0 = poseIDs[ idx_0 ]

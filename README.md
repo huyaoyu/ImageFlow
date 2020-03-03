@@ -99,3 +99,22 @@ Some 3D point clouds will be written if --debug command line argument is specifi
 * __XInWorld_1.ply__: What's the same objective looks like in the world frame from the perspective of camera 1 (the second camera).
 
 For all the point clouds, the vertex color is defined by the distance from the camera center, the red the further, the blue the nearer. "__distanceRange__" in File A is a threshold (measured in meter) that any point beyond this distance will be omitted in the PLY file.
+
+## Install PCL on Ubuntu 18.04
+* install libpcl-dev, the default version is 1.8 
+```sudo apt-get install libpcl-dev```
+* install python-pcl from source
+  - downgrade cython to 0.25.2
+  ```
+  pip uninstall cython
+  pip install cython=0.25.2
+  ```
+  - build the code w/ tag v0.3.0rc1
+  ```
+  git clone https://github.com/strawlab/python-pcl.git
+  cd python-pcl
+  git checkout tags/v0.3.0rc1
+  python setup.py build_ext -i
+  sudo python setup.py install
+  ```
+
