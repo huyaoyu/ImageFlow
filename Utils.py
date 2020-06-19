@@ -18,6 +18,16 @@ def show_delimiter(title = "", c = "=", n = 50, leading = "\n", ending = "\n"):
 
     print("%s%s%s" % (leading, s, ending))
 
+def get_filename_parts(fn):
+    p = os.path.split(fn)
+
+    if ( "" == p[0] ):
+        p = (".", p[1])
+
+    f = os.path.splitext(p[1])
+
+    return [ p[0], f[0], f[1] ]
+
 def test_dir(d):
     if ( False == os.path.isdir(d) ):
         os.makedirs(d)

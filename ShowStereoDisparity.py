@@ -97,6 +97,10 @@ def visualize_disparity_KITTI(disp, fn, maxDisp=None, flagShowFigure=True):
         cv2.imshow("disp", disp)
         cv2.waitKey()
 
+    cv2.imwrite(fn, disp)
+
+    return disp
+
 def visualize_depth_as_disparity(depth, BF, mask=None, outDir=None, outName=None, maxDepth=None, waitTime=None, flagShowFigure=True, maxHue=179, n=8):
     if ( maxDepth is None ):
         BFMaxDepth = None
@@ -226,7 +230,8 @@ def run(args):
 
     print("disp.max() = %f. " % ( disp.max() ))
 
-    outFn = "%s/%s.png" % ( outDir, outName )
+    outFn = "%s/%s_vis.png" % ( outDir, outName )
+    print(outFn)
 
     flagShowFigure = True
     if ( args.not_show ):
@@ -240,9 +245,6 @@ def run(args):
     if ( args.style == "kitti" ):
         dispN = visualize_disparity_KITTI( disp, outFn, \
             maxDisp=colorMaxDisp, flagShowFigure=flagShowFigure )
-
-        cv2.imshow(outName, dispN)
-        cv2.waitKey()
     elif ( args.style == "hsv" ):
         visualize_disparity_HSV( disp, mask, outDir, outName, \
             maxDisp=colorMaxDisp, flagShowFigure=flagShowFigure, maxHue=159 )
