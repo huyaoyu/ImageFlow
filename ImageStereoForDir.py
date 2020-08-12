@@ -95,8 +95,8 @@ def merge_masks(maskFOV, maskOcc):
     tempMask = maskOcc == STEREO_CROSS_OCC
     mask[tempMask] = STEREO_CROSS_OCC
 
-    tempMask = maskOcc == STEREO_SELF_OCC
-    mask[tempMask] = STEREO_SELF_OCC
+    # tempMask = maskOcc == STEREO_SELF_OCC
+    # mask[tempMask] = STEREO_SELF_OCC
 
     tempMask = maskFOV == STEREO_OUT_OF_FOV
     mask[tempMask] = STEREO_OUT_OF_FOV
