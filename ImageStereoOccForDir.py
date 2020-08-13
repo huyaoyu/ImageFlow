@@ -29,6 +29,34 @@ STEREO_CROSS_OCC    = 1
 STEREO_FILTERED_OCC = 10
 STEREO_NON_MASK     = 255
 
+class DirectoryCreator(object):
+    def __init__(self, baseDir=None, baseSuffix=None):
+        super(DirectoryCreator, self).__init__()
+
+        self.baseDir = baseDir
+        self.baseSuffix = baseSuffix
+
+        if ( self.baseDir is not None ):
+            self.prefix = self.baseDir
+            if ( self.baseSuffix is not None ):
+                self.prefix = os.path.join( self.prefix, self.baseSuffix )
+        else:
+            self.prefix = ''
+
+        self.previous = None
+
+    def create_by_filename(self, fn):
+        parts = Utils.get_filename_parts(fn)
+
+        if ( parts[0] == self.previous ):
+            return
+        
+        d = os.path.join( self.prefix, parts[0] )
+        if ( not os.path.isdir(d) ):
+            os.makedirs(d)
+        
+        self.previous = parts[0]
+
 def read_string_list(fn, prefix=""):
     """
     fn (string): The filename.
@@ -377,7 +405,7 @@ def save_mask(root, fn0, mask):
     parts = Utils.get_filename_parts(fn0)
 
     outDir = os.path.join( root, 'occ', parts[0] )
-    Utils.test_dir(outDir)
+    # Utils.test_dir(outDir)
 
     outFn = os.path.join( outDir, '%s.png' % (parts[1]) )
 
@@ -401,7 +429,7 @@ def write_masked_image(root, img0, mask):
     parts = Utils.get_filename_parts(img0)
 
     outDir = os.path.join( root, 'occ', parts[0] )
-    Utils.test_dir(outDir)
+    # Utils.test_dir(outDir)
 
     outFn = os.path.join( outDir, '%s.png' % (parts[1]) )
     cv2.imwrite(outFn, img, [cv2.IMWRITE_PNG_COMPRESSION, 5])
@@ -731,27 +759,44 @@ def main():
     loggerQueue.join()
 
     # ========== Job submission. ==========
+    maskDirCreator = DirectoryCreator( filesDict["datasetRoot"], 'occ' )
+    imgDirCreator  = DirectoryCreator( filesDict["datasetRoot"], 'occ' )
+
     # Submit jobs.
     if ( filesDict['flagDepth'] ):
         for i in range(nFiles):
+            depth0Fn = filesDict['depthList0'][i]
+            maskDirCreator.create_by_filename(depth0Fn)
+            
+            imgFn = filesDict['img0FnList'][i]
+            if ( args.write_images ):
+                imgDirCreator.create_by_filename(imgFn)
+
             d = { "idx": i, \
                 "flagDepth": True, \
-                "depth0": filesDict["depthList0"][i], \
+                "depth0": depth0Fn, \
                 "depth1": filesDict["depthList1"][i], \
                 "bf": filesDict["bf"], \
                 "datasetRoot": filesDict["datasetRoot"], \
                 "flagWriteImage": args.write_images, \
-                "img0Fn": filesDict["img0FnList"][i] }
+                "img0Fn": imgFn }
 
             jqueue.put(d)
     else:
         for i in range(nFiles):
+            dispFn = filesDict['dispFnList'][i]
+            maskDirCreator.create_by_filename(dispFn)
+            
+            imgFn = filesDict['img0FnList'][i]
+            if ( args.write_images ):
+                imgDirCreator.create_by_filename(imgFn)
+
             d = { 'idx': i, \
                 'flagDepth': False, \
-                'dispFn': filesDict['dispFnList'][i], \
+                'dispFn': dispFn, \
                 'datasetRoot': filesDict['datasetRoot'], \
                 'flagWriteImage': args.write_images, \
-                'img0Fn': filesDict['img0FnList'][i] }
+                'img0Fn': imgFn }
 
             jqueue.put(d)
 
