@@ -615,13 +615,13 @@ def worker(name, jq, rq, lq, p):
             job = jq.get(True, 1)
             # print("{}: {}.".format(name, jobStrList))
 
-            count = single_process(job)
+            countMask = single_process(job)
 
             rq.put( { \
                 "name": name, \
                 "idx": job["idx"], \
                 "dispFn": job["dispFn"], \
-                "countMasked": count } )
+                "countMasked": countMask } )
 
             count += 1
 
