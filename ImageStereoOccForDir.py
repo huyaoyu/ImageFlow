@@ -437,6 +437,9 @@ def handle_script_args(parser):
     parser.add_argument("inputjson", type=str, \
         help="The input JSON file describing the dataset. ")
 
+    parser.add_argument("jsonentry", type=str, \
+        help="The JSON entry to read as the input filelist. ")
+
     parser.add_argument("--max-num", type=int, default=0, \
         help="The maximum number of stereo pairs to process. Debug use. Set 0 to disable. ")
 
@@ -660,7 +663,7 @@ def worker(name, jq, rq, lq, p):
     
     lq.put("%s: Done with %d jobs." % (name, count))
 
-def load_dataset(fn):
+def load_dataset(fn, jsonEntry):
     '''
     fn (string): The filename of the input JSON.
     '''
@@ -671,7 +674,7 @@ def load_dataset(fn):
     with open(fn, 'r') as fp:
         dataset = json.load(fp)
 
-    fileListFn = os.path.join( dataset['fileListDir'], dataset['trainFileList'] )
+    fileListFn = os.path.join( dataset['fileListDir'], dataset[jsonEntry] )
 
     if ( dataset['flagDepth'] ):
         img0FnList, _, depth0FnList = read_string_list_2D( fileListFn, 3, delimiter=dataset['delimiter'] )
@@ -706,7 +709,7 @@ def main():
     args   = handle_script_args(parser)
 
     # Dataset description.
-    filesDict = load_dataset( args.inputjson )
+    filesDict = load_dataset( args.inputjson, args.jsonentry )
     if ( filesDict['flagDepth'] ):    
         nFiles = len( filesDict["depthList0"] )
     else:
