@@ -471,7 +471,7 @@ def save_report(fn, report):
     df.to_csv(fn, index=False)
 
 def worker_rq(name, rq, lq, nFiles, resFn, timeoutCountLimit=100):
-    resultDict = { 'idx':[], 'name': [], 'dispFn': [], 'countMasked': [] }
+    resultDict = { 'idx':[], 'name': [], 'dispFn': [], 'depth0Fn':[], 'countMasked': [] }
     resultCount = 0
     timeoutCount = 0
 
@@ -483,6 +483,7 @@ def worker_rq(name, rq, lq, nFiles, resFn, timeoutCountLimit=100):
             resultDict['idx'].append(r['idx'])
             resultDict['name'].append(r['name'])
             resultDict['dispFn'].append(r['dispFn'])
+            resultDict['depth0Fn'].append(r['depth0Fn'])
             resultDict['countMasked'].append(r['countMasked'])
             resultCount += 1
 
@@ -565,7 +566,7 @@ def single_process_depth(job):
     bf     = job['bf']
 
     # Calculate the disparity.
-    disp, mask = calculate_stereo_disparity_naive( depth0, depth1, bf )
+    mask = calculate_stereo_disparity_naive( depth0, depth1, bf )
 
     # Save the disparity and mask.
     save_mask( job["datasetRoot"], job["depth0"], mask )
@@ -648,6 +649,7 @@ def worker(name, jq, rq, lq, p):
                 "name": name, \
                 "idx": job["idx"], \
                 "dispFn": job["dispFn"], \
+                "depth0Fn": job["depth0"], \
                 "countMasked": countMask } )
 
             count += 1
@@ -781,6 +783,7 @@ def main():
 
             d = { "idx": i, \
                 "flagDepth": True, \
+                "dispFn": "", \
                 "depth0": depth0Fn, \
                 "depth1": filesDict["depthList1"][i], \
                 "bf": filesDict["bf"], \
@@ -801,6 +804,7 @@ def main():
             d = { 'idx': i, \
                 'flagDepth': False, \
                 'dispFn': dispFn, \
+                'depth0': '', \
                 'datasetRoot': filesDict['datasetRoot'], \
                 'flagWriteImage': args.write_images, \
                 'img0Fn': imgFn }
