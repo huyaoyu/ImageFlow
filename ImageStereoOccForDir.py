@@ -192,7 +192,6 @@ def find_stereo_occlusions_naive(depth_0, depth_1, disp, BF):
             ddMax = BF/d**2
 
             if ( dep0 <= dep1 or dep0 - dep1 <= 2*ddMax):
-                # The pixel from cam_0 is closer.
                 if ( showDetails ):
                     print("Cross-occlusion: Current pixel closer.")
             else:
@@ -386,9 +385,9 @@ def calculate_stereo_disparity_naive(depth_0, depth_1, BF):
     # Merge the masks
     mask = merge_masks(maskFOV, maskOcc)
 
-    filter_mask(mask, disp, STEREO_NON_MASK, STEREO_FILTERED_OCC)
+    # filter_mask(mask, disp, STEREO_NON_MASK, STEREO_FILTERED_OCC)
 
-    return disp, mask
+    return mask
 
 def calculate_stereo_mask_only_naive(disp):
 
@@ -673,9 +672,17 @@ def load_dataset(fn):
     fileListFn = os.path.join( dataset['fileListDir'], dataset['trainFileList'] )
 
     if ( dataset['flagDepth'] ):
-        pass
+        img0FnList, _, depth0FnList = read_string_list_2D( fileListFn, 3, delimiter=dataset['delimiter'] )
+        depth1FnList = [ f.replace('_left', '_right') for f in depth0FnList ]
+        filesDict = { \
+            'flagDepth':True, \
+            'img0FnList': img0FnList, \
+            'depthList0': depth0FnList, \
+            'depthList1': depth1FnList, \
+            'bf': dataset['fb'], \
+            'datasetRoot': dataset['datasetRoot'] }
     else:
-        img0FnList, _, dispFnList = read_string_list_2D( fileListFn, 3 )
+        img0FnList, _, dispFnList = read_string_list_2D( fileListFn, 3, delimiter=dataset['delimiter'] )
         filesDict = { \
             'flagDepth': False, \
             'img0FnList': img0FnList, \
