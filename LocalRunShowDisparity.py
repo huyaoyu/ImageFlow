@@ -34,8 +34,8 @@ if __name__ == "__main__":
 
     # Find all the files.
 
-    disps = sorted( glob.glob( "%s/%s" % ( args.indir, args.pattern_disp ) ) )
-    masks = sorted( glob.glob( "%s/%s" % ( args.indir, args.pattern_mask ) ) )
+    disps = sorted( glob.glob( "%s/**/%s" % ( args.indir, args.pattern_disp ), recursive=True ) )
+    masks = sorted( glob.glob( "%s/**/%s" % ( args.indir, args.pattern_mask ), recursive=True ) )
 
     nF = len( disps )
     nM = len( masks )

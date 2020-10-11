@@ -25,6 +25,8 @@ STEREO_OUT_OF_FOV = 11
 STEREO_SELF_OCC   = 2
 STEREO_CROSS_OCC  = 1
 
+STEREO_NON_OCC    = 255
+
 @numba.jit(nopython=True)
 def find_stereo_occlusions_naive(depth_0, depth_1, disp, BF):
     h, w = depth_0.shape[0], depth_0.shape[1]
@@ -35,8 +37,10 @@ def find_stereo_occlusions_naive(depth_0, depth_1, disp, BF):
 
     occupancyMap_00 = np.zeros((h, w, 2), dtype=NP_INT) - 1
 
-    # debugX = 3072
-    # debugY = 2531
+    # debugX = 1659
+    # debugY = 1162
+    debugX = -1
+    debugY = -1
 
     for i in range(h):
         for j0 in range(w):
@@ -51,8 +55,8 @@ def find_stereo_occlusions_naive(depth_0, depth_1, disp, BF):
             # The correspondence
             x1 = int( round( x0 - d ) )
 
-            # if ( y == debugY and x0 == debugX ):
-            #     showDetails = True
+            if ( y == debugY and x0 == debugX ):
+                showDetails = True
 
             if ( showDetails ):
                 print("i = ", i, ", j0 = ", j0, ". ")
@@ -68,7 +72,19 @@ def find_stereo_occlusions_naive(depth_0, depth_1, disp, BF):
             dep1  = depth_1[y, x1]
             ddMax = BF/d**2
 
-            if ( dep0 <= dep1 or dep0 - dep1 <= 2*ddMax):
+            if ( dep0 >= 1000 and dep1 >= 1000):
+                # Both points are at infinity.
+                if ( showDetails ):
+                    print("Both points are at infinity. ")
+            elif ( dep0 - dep1 >= 1000 and dep1 <= 1000 ):
+                # pixel from cam_0 is at infinity.
+                # Occlusion.
+                if ( maskOcc[ y, x0 ] != STEREO_OUT_OF_FOV ):
+                    maskOcc[ y, x0 ] = STEREO_CROSS_OCC
+
+                if ( showDetails ):
+                    print("Infinity-occlusion: Current pixel farther.")
+            elif ( dep0 <= dep1 or dep0 - dep1 <= 2*ddMax):
                 # The pixel from cam_0 is closer.
                 if ( showDetails ):
                     print("Cross-occlusion: Current pixel closer.")
@@ -89,7 +105,7 @@ def find_stereo_occlusions_naive(depth_0, depth_1, disp, BF):
     return maskFOV, maskOcc, occupancyMap_00
 
 def merge_masks(maskFOV, maskOcc):
-    mask = np.zeros_like(maskFOV, dtype=np.uint8) + 255
+    mask = np.zeros_like(maskFOV, dtype=np.uint8) + STEREO_NON_OCC
 
     # The order of the application of the masks matters.
     tempMask = maskOcc == STEREO_CROSS_OCC
@@ -125,11 +141,34 @@ def calculate_stereo_disparity_naive(depth_0, depth_1, BF):
 
     return disp, mask
 
+def convert_single_channel_float_array_2_image(array):
+    assert( 2 == array.ndim )
+
+    limit0 = array.min()
+    limit1 = array.max()
+
+    array = array - limit0
+    array = array / ( limit1 - limit0 ) * 255
+
+    return array.astype( np.uint8 )
+
+def convert_mask_2_image(mask):
+    m = mask == STEREO_NON_OCC
+    mask[m] = 255
+    mask[np.logical_not(m)] = 0
+    return mask
+
 def save_disparity_mask(fn0, disp, mask):
     parts = Utils.get_filename_parts(fn0)
 
     np.save( "%s/%s_disp.npy" % (parts[0], parts[1]), disp )
     np.save( "%s/%s_mask.npy" % (parts[0], parts[1]), mask )
+    
+    cv2.imwrite( "%s/%s_disp.png" % (parts[0], parts[1]), 
+        convert_single_channel_float_array_2_image(disp) )
+
+    cv2.imwrite( "%s/%s_mask.png" % (parts[0], parts[1]), 
+        convert_mask_2_image(mask) )
 
 def handle_script_args(parser):
     parser.add_argument("inputdir", type=str, \
@@ -314,18 +353,18 @@ def find_intput_files(args):
     if ( nDepth0 != nDepth1 ):
         raise Exception( \
 """Wrong numbers of files: nDepth0 = {}, nDepth1 = {}\n\
-inputdir: %s\n
-left_depth_pattern:  %s\n
-right_depth_pattern: %s\n""".format(nDepth0, nDepth1, \
+inputdir: {}\n
+left_depth_pattern:  {}\n
+right_depth_pattern: {}\n""".format(nDepth0, nDepth1, \
                     args.inputdir, 
                     args.left_depth_pattern, args.right_depth_pattern) )
 
     if ( 0 == nDepth0 ):
         raise Exception( \
 """No files found. \n\
-inputdir: %s\n
-left_depth_pattern:  %s\n
-right_depth_pattern: %s\n""".format(args.inputdir, \
+inputdir: {}\n
+left_depth_pattern:  {}\n
+right_depth_pattern: {}\n""".format(args.inputdir, \
                     args.left_depth_pattern, args.right_depth_pattern) )
 
     # Compose the dictionary.
