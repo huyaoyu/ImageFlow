@@ -18,12 +18,56 @@ import sys
 
 from CommonType import NP_FLOAT, NP_INT
 
+LOCAL_NP_FLOAT=np.float32
+
 import Utils
 
 STEREO_OUT_OF_FOV = 11
 
 STEREO_SELF_OCC   = 2
 STEREO_CROSS_OCC  = 1
+
+def warp_by_disparity(img, disp):
+    '''
+    img (NumPy array): OpenCV format image array. 0/1-channel or 3-channel.
+    disp (NumPy array): Disparity array. 0/1-channel.
+
+    img is the image from which to sample. The sampling coordinates will be
+    computed by subracting disp from the coordinates of an ordinary image
+    coordinates.
+    '''
+
+    # ========== Modify the dimensions if needed. ==========
+    if ( disp.ndim == 3 ):
+        if ( disp.shape[2] != 1 ):
+            raise Exception('Wrong dimension of disp. disp.shape = {}'.format(disp.shape))
+        else:
+            disp = disp.reshape( ( disp.shape[0], disp.shape[1] ) )
+
+    if ( img.ndim == 3 ):
+        if ( img.shape[2] == 1 ):
+            img = img.reshape( ( img.shape[0], img.shape[1] ) )
+
+    # ========== Prepare the sampling coordiantes. ===========
+    H, W = img.shape[:2]
+
+    x = np.arange(0, W, dtype=np.float32)
+    y = np.arange(0, H, dtype=np.float32)
+
+    xx, yy = np.meshgrid(x, y)
+    xx = xx - disp
+    xx = xx.astype(np.float32)
+    # xx = xx.reshape( ( xx.shape[0], xx.shape[1], 1 ) )
+    # yy = yy.reshape( ( yy.shape[0], yy.shape[1], 1 ) )
+    # print('xx.dtype = {}'.format(xx.dtype))
+    # print('yy.dtype = {}'.format(yy.dtype))
+    # print('xx.shape = {}'.format(xx.shape))
+    # print('yy.shape = {}'.format(yy.shape))
+
+    # ========== Sample the warped image. ==========
+    warped = cv2.remap(img, xx, yy, interpolation=cv2.INTER_LINEAR)
+
+    return warped
 
 @numba.jit(nopython=True)
 def find_stereo_occlusions_naive(depth_0, depth_1, disp, BF):
@@ -125,21 +169,28 @@ def calculate_stereo_disparity_naive(depth_0, depth_1, BF):
 
     return disp, mask
 
-def save_disparity_mask(fn0, disp, mask):
+def save_disparity_mask_warped(fn0, disp, mask, warped):
     parts = Utils.get_filename_parts(fn0)
 
     np.save( "%s/%s_disp.npy" % (parts[0], parts[1]), disp )
-    np.save( "%s/%s_mask.npy" % (parts[0], parts[1]), mask )
+    cv2.imwrite( "%s/%s_mask.png" % (parts[0], parts[1]), mask, [cv2.IMWRITE_PNG_COMPRESSION, 5] )
+    cv2.imwrite( "%s/%s_warped.png" % ( parts[0], parts[1] ), warped, [cv2.IMWRITE_PNG_COMPRESSION, 5] )
 
 def handle_script_args(parser):
     parser.add_argument("inputdir", type=str, \
         help="The directory name that contains the ISInput.json file. ")
 
-    parser.add_argument("--left-depth-pattern", type=str, default="*depth_0.npy", \
+    parser.add_argument("--depth-pattern-0", type=str, default="*depth_0.npy", \
         help="The search pattern for the left depth. ")
 
-    parser.add_argument("--right-depth-pattern", type=str, default="*depth_1.npy", \
+    parser.add_argument("--depth-pattern-1", type=str, default="*depth_1.npy", \
         help="The search pattern for the right depth. ")
+
+    parser.add_argument("--image-pattern-0", type=str, default="*rgb_0.png", \
+        help="The search pattern for the reference image. ")
+    
+    parser.add_argument("--image-pattern-1", type=str, default="*rgb_1.png", \
+        help="The search pattern for the source/test image. ")
 
     parser.add_argument("--bf", type=float, default=80.0, \
         help="The baseline * focal length of the stereo.")
@@ -212,14 +263,25 @@ def single_process(job, bf):
     bf: baseline * focal length.
     """
     # Load the depth data.
-    depth0 = np.load(job["depth0"]).astype(NP_FLOAT)
-    depth1 = np.load(job["depth1"]).astype(NP_FLOAT)
+    depth0 = np.load(job["depth0"]).astype(LOCAL_NP_FLOAT)
+    depth1 = np.load(job["depth1"]).astype(LOCAL_NP_FLOAT)
 
     # Calculate the disparity.
     disp, mask = calculate_stereo_disparity_naive( depth0, depth1, bf )
 
+    # Load the source/test image.
+    imgSrc = cv2.imread( job["image1"], cv2.IMREAD_UNCHANGED )
+
+    # Warp the source/test image.
+    warped = warp_by_disparity(imgSrc, disp)
+
     # Save the disparity and mask.
-    save_disparity_mask( job["depth0"], disp, mask )
+    save_disparity_mask_warped( job["depth0"], disp, mask, warped )
+
+    # # Debut use.
+    # parts = Utils.get_filename_parts(job["depth0"])
+    # img1OutFn = os.path.join( parts[0], "%s_image1.png" % (parts[1]) )
+    # cv2.imwrite(img1OutFn, imgSrc)
 
 def worker(name, jq, rq, lq, p, args):
     """
@@ -303,33 +365,49 @@ def save_report(fn, report):
 def find_intput_files(args):
     # Find the depth maps.
     depthList0 = sorted( glob.glob( 
-        "%s/**/%s" % ( args.inputdir, args.left_depth_pattern ),  recursive=True ) )
+        "%s/**/%s" % ( args.inputdir, args.depth_pattern_0 ), recursive=True ) )
     depthList1 = sorted( glob.glob( 
-        "%s/**/%s" % ( args.inputdir, args.right_depth_pattern ), recursive=True ) )
+        "%s/**/%s" % ( args.inputdir, args.depth_pattern_1 ), recursive=True ) )
+
+    imageList0 = sorted( glob.glob(
+        "%s/**/%s" % ( args.inputdir, args.image_pattern_0 ), recursive=True ) )
+    imageList1 = sorted( glob.glob(
+        "%s/**/%s" % ( args.inputdir, args.image_pattern_1 ), recursive=True ) )
 
     # Check the numbers.
     nDepth0 = len(depthList0)
     nDepth1 = len(depthList1)
+    nImage0 = len(imageList0)
+    nImage1 = len(imageList1)
 
-    if ( nDepth0 != nDepth1 ):
+    if ( nDepth0 != nDepth1 or nImage0 != nImage1 or nDepth0 != nImage0 ):
         raise Exception( \
-"""Wrong numbers of files: nDepth0 = {}, nDepth1 = {}\n\
-inputdir: %s\n
-left_depth_pattern:  %s\n
-right_depth_pattern: %s\n""".format(nDepth0, nDepth1, \
-                    args.inputdir, 
-                    args.left_depth_pattern, args.right_depth_pattern) )
+"""Wrong numbers of files: nDepth0 = {}, nDepth1 = {}, nImage0 = {}, nImage1 = {}\
+inputdir: %s
+depth_pattern_0: %s
+depth_pattern_1: %s
+image_pattern_0: %s
+image_pattern_1: %s
+""".format(nDepth0, nDepth1, nImage0, nImage1, \
+            args.inputdir, \
+            args.depth_pattern_0, args.depth_pattern_1, \
+            args.image_pattern_0, args.image_pattern_1 ) )
 
     if ( 0 == nDepth0 ):
         raise Exception( \
-"""No files found. \n\
-inputdir: %s\n
-left_depth_pattern:  %s\n
-right_depth_pattern: %s\n""".format(args.inputdir, \
-                    args.left_depth_pattern, args.right_depth_pattern) )
+"""No files found.\
+inputdir: %s
+depth_pattern_0: %s
+depth_pattern_1: %s
+image_pattern_0: %s
+image_pattern_1: %s
+""".format(args.inputdir, \
+        args.depth_pattern_0, args.depth_pattern_1, \
+        arsg.image_pattern_0, args.image_pattern_1 ) )
 
     # Compose the dictionary.
-    return { "depthList0": depthList0, "depthList1": depthList1 }
+    return { "depthList0": depthList0, "depthList1": depthList1, \
+             "imageList0": imageList0, "imageList1": imageList1 }
 
 def max_num(nFiles, maxNum):
     if ( maxNum > 0 and maxNum < nFiles ):
@@ -392,7 +470,9 @@ def main():
     for i in range(nFiles):
         d = { "idx": i, \
             "depth0": filesDict["depthList0"][i], 
-            "depth1": filesDict["depthList1"][i] }
+            "depth1": filesDict["depthList1"][i],
+            "image0": filesDict["imageList0"][i], 
+            "image1": filesDict["imageList1"][i] }
 
         jqueue.put(d)
 
