@@ -134,7 +134,8 @@ def read_string_list_2D(fn, expCols, delimiter=",", prefix=""):
                 line = extract_strings(lines[i].strip(), expCols, delimiter)
 
                 for j in range(expCols):
-                    line[j] = "%s/%s" % ( prefix, line[j] )
+                    col = line[j]
+                    line[j] = "%s/%s" % ( prefix, col ) if col != 'None' else col
 
                 strings2D.append( line )
 
@@ -211,19 +212,19 @@ def find_stereo_occlusions_naive(depth_0, depth_1, disp, BF):
     return maskFOV, maskOcc
 
 @numba.jit(nopython=True)
-def find_stereo_occlusion_by_disp_naive( disp ):
-    h, w = disp.shape[:2]
+def find_stereo_occlusion_by_disp_naive( disp0, disp1=None ):
+    h, w = disp0.shape[:2]
 
     # Masks.
-    maskFOV = np.zeros_like(disp, dtype=np.uint8)
-    maskOcc = np.zeros_like(disp, dtype=np.uint8)
+    maskFOV = np.zeros_like(disp0, dtype=np.uint8)
+    maskOcc = np.zeros_like(disp0, dtype=np.uint8)
 
     # Occupancy maps.
     occupancyMap_01 = np.zeros((h, w), dtype=np.int32) - 1
-    occupancyMap_d  = np.zeros_like(disp)
+    occupancyMap_d  = np.zeros_like(disp0)
 
-    # debugX = 3072
-    # debugY = 2531
+    # debugX = 258
+    # debugY = 414
 
     showDetails = False
 
@@ -233,13 +234,12 @@ def find_stereo_occlusion_by_disp_naive( disp ):
             x0 = int(j0)
 
             # Disparity.
-            d = disp[y, x0]
+            d = disp0[y, x0]
 
             # The correspondence
             x1 = int( round( x0 - d ) )
 
-            # if ( y == debugY and x0 == debugX ):
-            #     showDetails = True
+            # showDetails = True if y == debugY and x0 == debugX else False
 
             if ( showDetails ):
                 print("i = ", i, ", j0 = ", j0, ". ")
@@ -255,27 +255,45 @@ def find_stereo_occlusion_by_disp_naive( disp ):
                 # Free.
                 occupancyMap_01[y, x1] = x0
                 occupancyMap_d[y, x1]  = d
+
+                if ( showDetails ):
+                    print('Free')
+            else:
+                # ========== The target location in image 1 is occupied. ==========
+
+                d1c = occupancyMap_d[y, x1]  # The current disparity saved at the location [y, x1] of the occupancy map.
+                x0c = occupancyMap_01[y, x1] # The current index in image 0 saved at the location [y, x1] of the occupancy map.
+
+                if ( showDetails ):
+                    print( 'd1c = ', d1c, 'x0c = ', x0c )
+
+                if ( d - d1c > 0 ):
+                    # Pixel x0 is closer.
+                    if ( d - d1c > 1 ):
+                        # Pixel x0 occludes x0c.
+                        if ( maskOcc[ y, x0c ] != STEREO_OUT_OF_FOV ):
+                            maskOcc[ y, x0c ] = STEREO_SELF_OCC
+                    
+                    occupancyMap_01[ y, x1 ] = x0
+                    occupancyMap_d[ y, x1 ]  = d
+                else:
+                    # Pixel x0c is closer.
+                    if ( d - d1c < -1 ):
+                        if ( maskOcc[ y, x0 ] != STEREO_OUT_OF_FOV ):
+                            maskOcc[ y, x0 ] = STEREO_SELF_OCC
+
+            if ( disp1 is None ):
                 continue
 
-            # ========== The target location in image 1 is occupied. ==========
+            d1 = np.abs( disp1[y, x1] )
+            if ( showDetails ):
+                print('d1 = ', d1)
+                print('d1 - d = ', d1-d)
 
-            d1c = occupancyMap_d[y, x1]  # The current disparity saved at the location [y, x1] of the occupancy map.
-            x0c = occupancyMap_01[y, x1] # The current index in image 0 saved at the location [y, x1] of the occupancy map.
-
-            if ( d - d1c > 0 ):
-                # Pixel x0 is closer.
-                if ( d - d1c > 1 ):
-                    # Pixel x0 occludes x0c.
-                    if ( maskOcc[ y, x0c ] != STEREO_OUT_OF_FOV ):
-                        maskOcc[ y, x0c ] = STEREO_SELF_OCC
-                
-                occupancyMap_01[ y, x1 ] = x0
-                occupancyMap_d[ y, x1 ]  = d
-            else:
-                # Pixel x0c is closer.
-                if ( d - d1c < -1 ):
-                    if ( maskOcc[ y, x0 ] != STEREO_OUT_OF_FOV ):
-                        maskOcc[ y, x0 ] = STEREO_SELF_OCC
+            if ( d1 - d > 1.5 ):
+                # The target pixel in image1 is closer.
+                if ( maskOcc[ y, x0 ] != STEREO_OUT_OF_FOV ):
+                    maskOcc[ y, x0 ] = STEREO_CROSS_OCC
 
     return maskFOV, maskOcc, occupancyMap_01, occupancyMap_d
 
@@ -389,28 +407,28 @@ def calculate_stereo_disparity_naive(depth_0, depth_1, BF):
 
     return mask
 
-def calculate_stereo_mask_only_naive(disp):
+def calculate_stereo_mask_only_naive(disp0, disp1=None):
 
     maskFOV, maskOcc, occupancyMap_01, occupancyMap_d = \
-        find_stereo_occlusion_by_disp_naive( disp )
+        find_stereo_occlusion_by_disp_naive( disp0, disp1 )
 
     mask = merge_masks( maskFOV, maskOcc )
 
-    filter_mask(mask, disp, occupancyMap_d, STEREO_NON_MASK, STEREO_FILTERED_OCC)
+    filter_mask(mask, disp0, occupancyMap_d, STEREO_NON_MASK, STEREO_FILTERED_OCC)
 
     return mask
 
-def save_mask(root, fn0, mask):
+def save_mask(root, subDir, fn0, mask):
     parts = Utils.get_filename_parts(fn0)
 
-    outDir = os.path.join( root, 'occ', parts[0] )
+    outDir = os.path.join( root, subDir, parts[0] )
     # Utils.test_dir(outDir)
 
     outFn = os.path.join( outDir, '%s.png' % (parts[1]) )
 
     cv2.imwrite( outFn, mask, [ cv2.IMWRITE_PNG_COMPRESSION, 5 ] )
 
-def write_masked_image(root, img0, mask):
+def write_masked_image(root, subDir, img0, mask):
     inFn = os.path.join( root, img0 )
 
     if ( not os.path.isfile(inFn) ):
@@ -427,7 +445,7 @@ def write_masked_image(root, img0, mask):
     
     parts = Utils.get_filename_parts(img0)
 
-    outDir = os.path.join( root, 'occ', parts[0] )
+    outDir = os.path.join( root, subDir, parts[0] )
     # Utils.test_dir(outDir)
 
     outFn = os.path.join( outDir, '%s.png' % (parts[1]) )
@@ -439,6 +457,9 @@ def handle_script_args(parser):
 
     parser.add_argument("jsonentry", type=str, \
         help="The JSON entry to read as the input filelist. ")
+
+    parser.add_argument("occdir", type=str, \
+        help="The output subdirectory. ")
 
     parser.add_argument("--max-num", type=int, default=0, \
         help="The maximum number of stereo pairs to process. Debug use. Set 0 to disable. ")
@@ -474,7 +495,7 @@ def save_report(fn, report):
     df.to_csv(fn, index=False)
 
 def worker_rq(name, rq, lq, nFiles, resFn, timeoutCountLimit=100):
-    resultDict = { 'idx':[], 'name': [], 'dispFn': [], 'depth0Fn':[], 'countMasked': [] }
+    resultDict = { 'idx':[], 'name': [], 'disp0Fn': [], 'depth0Fn':[], 'countMasked': [] }
     resultCount = 0
     timeoutCount = 0
 
@@ -485,7 +506,7 @@ def worker_rq(name, rq, lq, nFiles, resFn, timeoutCountLimit=100):
             r = rq.get(block=True, timeout=1)
             resultDict['idx'].append(r['idx'])
             resultDict['name'].append(r['name'])
-            resultDict['dispFn'].append(r['dispFn'])
+            resultDict['disp0Fn'].append(r['disp0Fn'])
             resultDict['depth0Fn'].append(r['depth0Fn'])
             resultDict['countMasked'].append(r['countMasked'])
             resultCount += 1
@@ -572,35 +593,42 @@ def single_process_depth(job):
     mask = calculate_stereo_disparity_naive( depth0, depth1, bf )
 
     # Save the disparity and mask.
-    save_mask( job["datasetRoot"], job["depth0"], mask )
+    save_mask( job["datasetRoot"], job['occDir'], job["depth0"], mask )
 
     if ( job['flagWriteImage'] ):
-        write_masked_image(job['datasetRoot'], job['img0Fn'], mask)
+        write_masked_image(job['datasetRoot'], job['occDir'], job['img0Fn'], mask)
 
     countMask = mask != STEREO_NON_MASK
     return countMask.sum()
+
+def read_disp(fn):
+    parts = Utils.get_filename_parts(fn)
+
+    if ( '.npy' == parts[2] ):
+        disp = np.load( fn ).astype(NP_FLOAT)
+    elif ( '.pfm' == parts[2] ):
+        disp, _ = readPFM( fn )
+        disp = disp.astype(NP_FLOAT)
+    else:
+        raise Exception('Unexpected disparity format %s from %s. ' % (parts[2], fn))
+
+    return disp
 
 def single_process_disp(job):
     '''
     job (dict): Contains the job description. 
     '''
 
-    parts = Utils.get_filename_parts(job['dispFn'])
+    disp0 = read_disp( os.path.join(job['datasetRoot'], job['disp0Fn']) )
+    disp1 = read_disp( os.path.join(job['datasetRoot'], job['disp1Fn']) ) \
+        if job['disp1Fn'] != 'None' else None
 
-    if ( '.npy' == parts[2] ):
-        disp = np.load( os.path.join( job['datasetRoot'], job['dispFn'] ) ).astype(NP_FLOAT)
-    elif ( '.pfm' == parts[2] ):
-        disp, _ = readPFM( os.path.join( job['datasetRoot'], job['dispFn'] ) )
-        disp = disp.astype(NP_FLOAT)
-    else:
-        raise Exception('Unexpected disparity format %s from %s. ' % (parts[2], job['dispFn']))
+    mask = calculate_stereo_mask_only_naive( disp0, disp1 )
 
-    mask = calculate_stereo_mask_only_naive( disp )
-
-    save_mask( job['datasetRoot'], job['dispFn'], mask )
+    save_mask( job['datasetRoot'], job['occDir'], job['disp0Fn'], mask )
 
     if ( job['flagWriteImage'] ):
-        write_masked_image(job['datasetRoot'], job['img0Fn'], mask)
+        write_masked_image(job['datasetRoot'], job['occDir'], job['img0Fn'], mask)
 
     countMask = mask != STEREO_NON_MASK
     return countMask.sum()
@@ -651,7 +679,7 @@ def worker(name, jq, rq, lq, p):
             rq.put( { \
                 "name": name, \
                 "idx": job["idx"], \
-                "dispFn": job["dispFn"], \
+                "disp0Fn": job["disp0Fn"], \
                 "depth0Fn": job["depth0"], \
                 "countMasked": countMask } )
 
@@ -677,7 +705,8 @@ def load_dataset(fn, jsonEntry):
     fileListFn = os.path.join( dataset['fileListDir'], dataset[jsonEntry] )
 
     if ( dataset['flagDepth'] ):
-        img0FnList, _, depth0FnList = read_string_list_2D( fileListFn, 3, delimiter=dataset['delimiter'] )
+        img0FnList, _, depth0FnList = read_string_list_2D( 
+            fileListFn, 3, delimiter=dataset['delimiter'] )
         depth1FnList = [ f.replace('_left', '_right') for f in depth0FnList ]
         filesDict = { \
             'flagDepth':True, \
@@ -687,11 +716,14 @@ def load_dataset(fn, jsonEntry):
             'bf': dataset['fb'], \
             'datasetRoot': dataset['datasetRoot'] }
     else:
-        img0FnList, _, dispFnList = read_string_list_2D( fileListFn, 3, delimiter=dataset['delimiter'] )
+        img0FnList, _, disp0FnList, disp1FnList = \
+            read_string_list_2D( 
+                fileListFn, 4, delimiter=dataset['delimiter'] )
         filesDict = { \
             'flagDepth': False, \
             'img0FnList': img0FnList, \
-            'dispFnList': dispFnList, \
+            'disp0FnList': disp0FnList, \
+            'disp1FnList': disp1FnList, \
             'datasetRoot': dataset['datasetRoot'] }
     
     return filesDict
@@ -703,6 +735,7 @@ def max_num(nFiles, maxNum):
         return nFiles
 
 def main():
+    mainTimeStart = time.time()
     # ========== Entry preparation. ==========
     # Script arguments.
     parser = argparse.ArgumentParser(description="Create occlusion masks for a left-right stereo dataset.")
@@ -713,7 +746,7 @@ def main():
     if ( filesDict['flagDepth'] ):    
         nFiles = len( filesDict["depthList0"] )
     else:
-        nFiles = len( filesDict['dispFnList'] )
+        nFiles = len( filesDict['disp0FnList'] )
     
     nFiles = max_num(nFiles, args.max_num)
 
@@ -771,8 +804,8 @@ def main():
     loggerQueue.join()
 
     # ========== Job submission. ==========
-    maskDirCreator = DirectoryCreator( filesDict["datasetRoot"], 'occ' )
-    imgDirCreator  = DirectoryCreator( filesDict["datasetRoot"], 'occ' )
+    maskDirCreator = DirectoryCreator( filesDict["datasetRoot"], args.occdir )
+    imgDirCreator  = DirectoryCreator( filesDict["datasetRoot"], args.occdir )
 
     # Submit jobs.
     if ( filesDict['flagDepth'] ):
@@ -791,14 +824,16 @@ def main():
                 "depth1": filesDict["depthList1"][i], \
                 "bf": filesDict["bf"], \
                 "datasetRoot": filesDict["datasetRoot"], \
+                "occDir": args.occdir, \
                 "flagWriteImage": args.write_images, \
                 "img0Fn": imgFn }
 
             jqueue.put(d)
     else:
         for i in range(nFiles):
-            dispFn = filesDict['dispFnList'][i]
-            maskDirCreator.create_by_filename(dispFn)
+            disp0Fn = filesDict['disp0FnList'][i]
+            disp1Fn = filesDict['disp1FnList'][i]
+            maskDirCreator.create_by_filename(disp0Fn)
             
             imgFn = filesDict['img0FnList'][i]
             if ( args.write_images ):
@@ -806,9 +841,11 @@ def main():
 
             d = { 'idx': i, \
                 'flagDepth': False, \
-                'dispFn': dispFn, \
+                'disp0Fn': disp0Fn, \
+                'disp1Fn': disp1Fn, \
                 'depth0': '', \
                 'datasetRoot': filesDict['datasetRoot'], \
+                "occDir": args.occdir, \
                 'flagWriteImage': args.write_images, \
                 'img0Fn': imgFn }
 
@@ -867,7 +904,8 @@ def main():
     loggerProcess.join()
 
     # ========== All done. ==========
-    print("Main: Done.")
+    mainTimeEnd = time.time()
+    print("Main: Done in %fh. " % ( ( mainTimeEnd - mainTimeStart ) / 3600.0 ))
 
     return 0
 
