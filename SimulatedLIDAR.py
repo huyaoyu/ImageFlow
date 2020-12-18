@@ -1,32 +1,53 @@
-from __future__ import print_function
 
-import argparse
 import copy
+import cv2
 import numpy as np
+
+# Global constants
+PI_180 = np.pi / 180
 
 def convert_DEA_2_XYZ(d, e, a):
     """
-    e and a are defined in the camera frame with z-axis pointing forward.
+    e and a are defined in the camera frame with z-axis pointing forward, y-axis downwards.
+
+    Arguments: 
+    d (array): The distance.
+    e (array): The elivation angle. Unit degree.
+    a (array): The azimuthal angle. Unit degree.
+
+    Returns: 
+    A N by 3 array.
     """
 
     # Shift a with -90 degrees.
-    a = -a + 90
-    c = np.cos( e/180.0*np.pi )
-    x = d * c * np.cos( a/180.0*np.pi )
-    z = d * c * np.sin( a/180.0*np.pi )
-    y = d * np.sin( e/180.0*np.pi )
+    a  = a  * PI_180
+    e  = e  * PI_180
+    dc = d  * np.cos( e )
+    x  = dc * np.sin( a )
+    z  = dc * np.cos( a )
+    y  = d  * np.sin( e )
 
     return np.stack((x, y, z), axis=1)
 
 def convert_Velodyne_DEA_2_XYZ(d, e, a):
     """
-    e and a are defined in the camera frame with z-axis pointing forward.
+    e and a are defined in the Velodyne frame with y-axis pointing forward, z-axis upwards.
+
+    Arguments: 
+    d (array): Distance.
+    e (array): Elivation angle. Unit degree.
+    a (array): Azimuthal angle. Unit degree.
+
+    Returns: 
+    A N by 3 array.
     """
 
-    dc = d * np.cos( e/180.0*np.pi )
-    x = dc * np.sin( a/180.0*np.pi )
-    y = dc * np.cos( a/180.0*np.pi )
-    z = d * np.sin( e/180.0*np.pi )
+    e  = e  * PI_180
+    a  = a  * PI_180
+    dc = d  * np.cos( e )
+    x  = dc * np.sin( a )
+    y  = dc * np.cos( a )
+    z  = d  * np.sin( e )
 
     return np.stack((x, y, z), axis=1)
 
@@ -38,25 +59,28 @@ def convert_DEA_from_camera_2_Velodyne(d, e, a):
 
     For Velodyne, a is measured from y-axis to x-axis. e is measured from 
     the xy-plane to z-axis.
+
+    Arguments: 
+    d (array): Distance.
+    e (array): Elivation angle. Unit degree.
+    a (array): Azimuthal angle. Unit degree.
+
+    Returns: 
+    d, e, a.
     """
 
     return copy.deepcopy(d), -e, copy.deepcopy(a)
 
 def convert_DEA_from_camera_2_Velodyne_XYZ(d, e, a):
+    '''
+    This function converts d, e, a represented points from the camera frame to the xyz Coordinates
+    under the Velodyne frame.
+    '''
     d, e, a = convert_DEA_from_camera_2_Velodyne(d, e, a)
     return convert_Velodyne_DEA_2_XYZ(d, e, a)
 
-def convert_lidar_point_list_2_array(pointList):
-    return np.concatenate( pointList, axis=0 ) 
-
-class LIDARDescription(object):
-    def __init__(self, desc=None):
-        super(LIDARDescription, self).__init__()
-
-        self.desc = desc
-
-VELODYNE_VLP_32C = LIDARDescription( \
-    [ \
+VELODYNE_VLP_32C = \
+    [
         { "id":  0, "E":-25,     "flagFlip":True, "resA": 0.1, "offA":  1.4 },
         { "id":  1, "E":-1,      "flagFlip":True, "resA": 0.1, "offA": -4.2 },
         { "id":  2, "E":-1.667,  "flagFlip":True, "resA": 0.1, "offA":  1.4 },
@@ -89,37 +113,40 @@ VELODYNE_VLP_32C = LIDARDescription( \
         { "id": 29, "E": 15,     "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
         { "id": 30, "E": 10.333, "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
         { "id": 31, "E":-1.333,  "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
-         ] )
+    ]
 
 class ScanlineParams(object):
-    def __init__( self, f, height, a=None, e=None, h=None, \
-            bx0=None, bx1=None, by0=None, by1=None, tx=None, ty=None, idxX=None, idxY=None, \
-            w00=None, w01=None, w10=None, w11=None ):
+    def __init__( self, f, height, aIntervalCheck=False):
+        '''
+        Arguments: 
+        f (int): Focal length. 
+        height (int): The height of the depth images.
+        aIntervalCheck (bool): Set true to enable the interval check.
+        '''
         super(ScanlineParams, self).__init__()
 
         self.f = f
         self.width  = f + f # Assuming 90 degrees FOV.
         self.height = height
+        self.flagAIntCheck = aIntervalCheck
 
-        self.a   = a
-        self.e   = e
-        self.bx0 = bx0
-        self.bx1 = bx1
-        self.by0 = by0
-        self.by1 = by1
-        self.tx  = tx
-        self.ty  = ty
-        self.idxX = idxX
-        self.idxY = idxY
+        self.a  = None
+        self.e  = None
+        self.a4 = None
+        self.e4 = None
 
-        self.w00 = w00
-        self.w01 = w01
-        self.w10 = w10
-        self.w11 = w11
-    
+        self.pX = None # X pixel coordinate in the first view.
+        self.pY = None # Y pixel coordinate in the first view.
+        self.x4 = None # X pixel coordinate in the combined view.
+        self.y4 = None # Y pixel coordinate in the combined view.
+
+        self.xCycle = None
+        
     def check_interval(self, interval):
         """
-        Assumint interval is a 1D array.
+        This function checks an interval array to see if the neighboring indices 
+        stored in interval have deltas larger than or equal to 1.
+        Assuming interval is a 1D array.
         """
 
         if ( interval.size < 3 ):
@@ -127,16 +154,17 @@ class ScanlineParams(object):
 
         d = interval[1:] - interval[:-1]
 
-        if ( d.min() < 1 ):
-            return False
-        else:
-            return True
+        return d.min() >= 1
 
-    def find_intervals(self, E, resA, offA):
+    def find_coordinates(self, E, resA, offA):
         """
-        E: The elevation angle of the scanline. Unit degree.
-        resA: The azimuth resolution. Unit degree.
-        offA: The azimuth offset. Unit degree.
+        This function sets up self.pX, self.pY, self.x4, self.y4, self.xCycle, 
+        self.a, self.e, self.a4, self.e4.
+
+        Arguments:
+        E (float): The elevation angle of the scanline. Unit degree.
+        resA (float): The azimuthal resolution. Unit degree.
+        offA (float): The azimuthal offset. Unit degree.
         """
 
         assert resA > 0
@@ -152,9 +180,9 @@ class ScanlineParams(object):
         a1 =  45 + np.absolute(offA)
 
         # Find aximuthal points.
-        a = np.linspace( a0, a1, int( (a1-a0)/resA + 1 ), endpoint=False )
-        mask = np.logical_and( a >= -45, a <  45 )
-        a = a[mask]
+        a    = np.linspace( a0, a1, int( (a1-a0)/resA + 1 ), endpoint=False )
+        mask = np.logical_and( a >= -45, a < 45 )
+        a    = a[mask]
 
         if ( a.size < N ):
             raise Exception("a.size(%d) < N(%d). " % ( a.size, N ))
@@ -162,235 +190,156 @@ class ScanlineParams(object):
         a = a[:N]
 
         # Find the pixel index.
-        p = self.f * np.tan( a / 180.0 * np.pi )
+        self.pX = self.f * np.tan( a * PI_180 ) + self.width/2
+        self.pX = self.pX.astype(np.float32)
 
-        p = p + self.width/2
-
-        bx0 = np.floor(p)
-        bx1 = np.ceil(p)
-
-        if ( not self.check_interval(bx0) ):
-            raise Exception("bx0 has bad interval.")
-        
-        if ( not self.check_interval(bx1) ):
-            raise Exception("bx1 has bad interval.")
-
-        tx = p - bx0
-
-        if ( bx0[0] < 0 or bx1[-1] >= self.width ):
-            raise Exception("bx0[0] = %f, bx1[-1] = %f. " % ( bx0[0], bx1[-1] ))
-
+        if ( self.flagAIntCheck ):
+            bx0 = np.floor(self.pX)
+            bx1 = np.ceil(self.pX)
+            if ( not self.check_interval(bx0) ):
+                raise Exception("bx0 has bad interval.")
+            
+            if ( not self.check_interval(bx1) ):
+                raise Exception("bx1 has bad interval.")
+        # import ipdb; ipdb.set_trace()
         # The h index.
-        p = self.f / np.cos( a / 180.0 * np.pi ) * np.tan( E / 180.0 * np.pi ) + self.height/2
+        self.pY = self.f / np.cos( a * PI_180 ) * np.tan( E * PI_180 ) + self.height/2
+        self.pY = self.pY.astype(np.float32)
 
-        by0 = np.floor(p)
-        by1 = np.ceil(p)
+        if ( self.pY[0] < 0 or self.pY[-1] >= self.height ):
+            raise Exception("self.pY[0] = %f, self.pY[-1] = %f, self.height = %f" \
+                % ( self.pY[0], self.pY[-1], self.height ))
 
-        ty = p - by0
+        # Shift the x and y pixel coordinates to the other 3 views.
 
-        if ( by0[0] < 0 or by1[-1] >= self.height ):
-            raise Exception("by0[0] = %f, by1[-1] = %f. " % ( by0[0], by1[-1] ))
+        self.x4 = np.concatenate( 
+            ( self.pX, self.pX + self.width, self.pX + 2*self.width, self.pX + 3*self.width ),
+            axis=0 )
+        
+        self.y4 = np.tile( self.pY, [4] )
 
-        self.tx  = tx
-        self.ty  = ty
+        self.xCycle = np.tile( self.pX, [4] )
 
-        self.w00 = ( 1.0 - self.tx ) * ( 1.0 - self.ty )
-        self.w01 = self.tx * ( 1.0 - self.ty )
-        self.w10 = ( 1.0 - self.tx ) * self.ty
-        self.w11 = self.tx * self.ty
+        # Save the a and e.
+        self.a = a
+        self.e = np.tile(E, [N])
 
-        self.a   = a
-        self.e   = np.tile(E, [N])
-        self.bx0 = bx0.astype(np.int)
-        self.bx1 = bx1.astype(np.int)
-        self.by0 = by0.astype(np.int)
-        self.by1 = by1.astype(np.int)
-
-        # Find the closet index for the LIDAR point.
-        self.idxX = np.round( self.bx0 + self.tx ).astype(np.int)
-        self.idxY = np.round( self.by0 + self.ty ).astype(np.int)
+        self.a4 = np.concatenate( 
+            (self.a, self.a + 90, self.a + 180, self.a + 270),
+            axis=0 )
+        self.e4 = np.tile( self.e, [4] )
 
 class SimulatedLIDAR(object):
-    def __init__(self, f, h, desc=None, varThreshold=None):
+    def __init__(self, f, h, desc=None):
+        '''
+        Arguments: 
+        f (int): Integer focal length.
+        h (int): Image height. 
+        desc (list of dictionaries): The LiDAR device descrition.
+        '''
         super(SimulatedLIDAR, self).__init__()
 
         self.f = f 
         self.w = f + f # We are assuming the horizontal FOV is 90 degrees.
         self.h = h
-        self.desc = None
-        self.scanlines = []
-        self.varThreshold = varThreshold
+        self.desc = desc
+        self.scanlineMaps   = [ None, None ] # The two maps, x and y.
+        self.xCycleArray    = None
+        self.azimuthArray   = None
+        self.elivationArray = None
 
     def set_description(self, desc):
+        assert ( desc is not None ), 'desc is None. '
         self.desc = desc
     
-    def set_variance_threshold(self, vt):
-        assert vt > 0
-
-        self.varThreshold = vt
-
-    def clear_variance_threshold(self):
-        self.varThreshold = None
-
     def initialize(self):
+        '''
+        This function computes the values for self.scanlineMaps, 
+        self.xCycleArray, self.aximuthArray, and self.elivationArray.
+        '''
         if ( self.desc is None ):
             raise Exception("self.desc is None.")
 
+        xMaps   = []
+        yMaps   = []
+        aList   = []
+        eList   = []
+        xCycles = []
+
         for d in self.desc:
-            E = d["E"]
+            E        = d["E"]
             flagFlip = d["flagFlip"]
-            resA = d["resA"]
-            offA = d["offA"]
+            resA     = d["resA"]
+            offA     = d["offA"]
 
             if ( flagFlip ):
                 E = -E
 
             sp = ScanlineParams(self.f, self.h)
-            sp.find_intervals( E, resA, offA )
+            sp.find_coordinates( E, resA, offA )
 
-            self.scanlines.append( sp )
+            xMaps.append( sp.x4 )
+            yMaps.append( sp.y4 )
+            xCycles.append( sp.xCycle )
+            aList.append( sp.a4 )
+            eList.append( sp.e4 )
+
+        self.scanlineMaps[0] = np.stack( xMaps, axis=0 )
+        self.scanlineMaps[1] = np.stack( yMaps, axis=0 )
+        self.xCycleArray     = np.stack( xCycles, axis=0 )
+        self.azimuthArray    = np.stack( aList, axis=0 )
+        self.elivationArray  = np.stack( eList, axis=0 )
 
     def convert_depth_2_distance(self, u, v, depth):
-        x = ( u - self.w/2 ) / self.f * depth
-        y = ( v - self.h/2 ) / self.f * depth
+        '''
+        Convert depth to distance in a camera frame.
 
-        return np.sqrt( x**2 + y**2 + depth**2 )
-        
-    def extract_single(self, depth, aShift, sp):
-        """
-        depth: The 2D depth image.
-        aShift: The shift of azimuthal angle for this depth image.
-        sp: A ScanlineParams object.
-        """
+        Arguments:
+        u (array): The x pixel coordinates.
+        v (array): The y pixel coordinates.
+        depth (array): The depth.
 
-        # Get the depth for the bounds.
-        dB00 = depth[ sp.by0, sp.bx0 ]
-        dB01 = depth[ sp.by0, sp.bx1 ]
-        dB10 = depth[ sp.by1, sp.bx0 ]
-        dB11 = depth[ sp.by1, sp.bx1 ]
-
-        # Interpolate.
-        d =  sp.w00 * dB00 + sp.w01 * dB01 + sp.w10 * dB10 + sp.w11 * dB11
-
-        # Distance.
-        dist = self.convert_depth_2_distance( sp.bx0 + sp.tx , sp.by0 + sp.ty, d )
-
-        return dist, copy.deepcopy(sp.e), sp.a + aShift
-
-    def extract_single_with_vt(self, depth, aShift, sp):
-        """
-        depth: The 2D depth image.
-        aShift: The shift of azimuthal angle for this depth image.
-        sp: A ScanlineParams object.
-        """
-
-        if ( self.varThreshold is None ):
-            raise Exception("self.varThreshold is None")
-
-        # Get the depth for the bounds.
-        dB00 = depth[ sp.by0, sp.bx0 ]
-        dB01 = depth[ sp.by0, sp.bx1 ]
-        dB10 = depth[ sp.by1, sp.bx0 ]
-        dB11 = depth[ sp.by1, sp.bx1 ]
-
-        # Interpolate.
-        d =  sp.w00 * dB00 + sp.w01 * dB01 + sp.w10 * dB10 + sp.w11 * dB11
-
-        # Stack the bounds.
-        B = np.stack( (dB00, dB01, dB10, dB11), axis=-1 )
-
-        # Find the variance of B.
-        vb = np.var( B, axis=-1 )
-
-        # Find the vaiance over the threshold.
-        mask = vb > self.varThreshold
-
-        # Find the indices.
-        d[mask] = depth[ sp.idxY[mask], sp.idxX[mask] ]
-
-        # Distance.
-        dist = self.convert_depth_2_distance( sp.bx0 + sp.tx , sp.by0 + sp.ty, d )
-
-        return dist, copy.deepcopy(sp.e), sp.a + aShift
+        Returns: 
+        A array of distance.
+        '''
+        x = ( u - self.w/2 ) / self.f
+        y = ( v - self.h/2 ) / self.f
+        return np.sqrt( x**2 + y**2 + 1 ) * depth
 
     def extract(self, depthList, maxDist=None):
         """
-        depthList is a 4-element list. Contains the depth image in the order of 
-        increasing azimuthal angle.
+        Extract point cloud from 4 depth images.
+
+        Arguments:
+        depthList (4-element of arrays): Contains the depth image in the order of 
+            increasing azimuthal angle.
+        maxDist (float): The clipping threshold. Set None to disable.
+
+        Returns: 
+        A N by 3 array, with the columns defined as distance, elivation, and azimuth.
         """
-
-        lidarPoints = []
-
-        # Loop over every scanline.
-        for sp in self.scanlines:
-            aShift = 0
-
-            distList = []
-            eList    = []
-            aList    = []
-
-            for depth in depthList:
-                # Extract from this depth image.
-                if ( self.varThreshold is not None ):
-                    d, e, a = self.extract_single_with_vt( depth, aShift, sp )
-                else:
-                    d, e, a = self.extract_single( depth, aShift, sp )
-
-                if ( maxDist is not None and maxDist > 0):
-                    d = np.clip(d, 0, maxDist)
-
-                distList.append( d )
-                eList.append( e )
-                aList.append( a )
-
-                aShift += 90
-
-            # Compose single extraction.
-            d = np.concatenate( distList, axis=0 )
-            e = np.concatenate( eList, axis=0 )
-            a = np.concatenate( aList, axis=0 )
-
-            lidarPoints.append( np.stack( (d, e, a), axis=1 ) )
-
-        return lidarPoints
-
-def save_LIDAR_poinst(fn, desc, lidarPoints, flagXYZ=False):
-    """
-    fn: Filename, without the extension.
-    desc: The description object.
-    lidarPoints: The list of LIDAR points.
-    """
-
-    if ( len(desc.desc) != len(lidarPoints) ):
-        raise Exception("len(desc.desc) != len(p), len(desc.desc) = %d, len(p) = %d. " % ( len(desc.desc), len(lidarPoints) ))
-
-    if ( flagXYZ ):
-        xyzList = []
-
-        for p in lidarPoints:
-            xyzList.append( convert_DEA_2_XYZ( p[:, 0], p[:, 1], p[:, 2] ) )
         
-        points = np.concatenate( xyzList, axis=0 )
-    else:
-        points = np.concatenate( lidarPoints, axis=0 )
+        # Merge the 4 depth images.
+        depth = np.concatenate( depthList, axis=1 )
 
-    # Get all the IDs.
-    ids = []
-    for d in desc.desc:
-        ids.append( d["id"] )
+        # Sample depth.
+        # sd = cv2.remap( depth, self.scanlineMaps[0], self.scanlineMaps[1], interpolation=cv2.INTER_LINEAR )
+        sd = cv2.remap( depth, self.scanlineMaps[0], self.scanlineMaps[1], interpolation=cv2.INTER_NEAREST )
 
-    ids = np.array(ids, dtype=np.int)
+        # Convert depth to distance.
+        dist = self.convert_depth_2_distance( self.xCycleArray, self.scanlineMaps[1], sd )
 
-    # Save the file.
-    outFn = "%s.npz" % (fn)
-    np.savez(outFn, points=points, ids=ids, flagXYZ=flagXYZ)
+        # Threshold the maximum distance.
+        if ( maxDist is not None and maxDist > 0 ):
+            dist = np.clip(dist, 0, maxDist)
+
+        return np.stack( ( dist, self.elivationArray, self.azimuthArray ), axis=-1 )
 
 def test_dummy_object():
     import SimplePLY
 
     sld = SimulatedLIDAR( 580, 768 )
-    sld.set_description( VELODYNE_VLP_32C.desc )
-
+    sld.set_description( VELODYNE_VLP_32C )
     sld.initialize()
 
     # Test with dummy detph images.
@@ -399,15 +348,12 @@ def test_dummy_object():
     depthList = [ depth, depth, depth, depth ]
 
     lidarPoints = sld.extract( depthList )
+    lidarPoints = lidarPoints.reshape( (-1, 3) )
 
-    xyzList = []
+    xyz = convert_DEA_2_XYZ( lidarPoints[:, 0], lidarPoints[:, 1], lidarPoints[:, 2] )
+    xyz = xyz.reshape((-1, 1, 3))
 
-    for p in lidarPoints:
-        xyzList.append( convert_DEA_2_XYZ( p[:, 0], p[:, 1], p[:, 2] ) )
-
-    xyz = np.concatenate( xyzList, axis=0 ) 
-
-    SimplePLY.output_to_ply( "./DummyLidar.ply", xyz.transpose(), [ len(xyzList), xyzList[0].shape[0]], 1000, np.array([0, 0, 0]).reshape((-1,1)) )
+    SimplePLY.output_to_ply( "./DummyLidar.ply", xyz.transpose(), [ 1, xyz.shape[0] ], 1000, np.array([0, 0, 0]).reshape((-1,1)) )
 
 def save_points_as_ply(fn, xyz, lines, pointsPerLine, maxDistColor):
     """
@@ -427,10 +373,15 @@ def save_points_as_ply(fn, xyz, lines, pointsPerLine, maxDistColor):
 
 def test_with_depth_file(inputFn):
     import os
+    import SimplePLY
+
+    # Output preparation.
+    parts = os.path.split(inputFn)
+    if ( not os.path.isdir(parts[0]) ):
+        os.makdirs( parts[0] )
 
     sld = SimulatedLIDAR( 580, 768 )
-    sld.set_description( VELODYNE_VLP_32C.desc )
-
+    sld.set_description( VELODYNE_VLP_32C )
     sld.initialize()
 
     depths = np.load(inputFn)
@@ -442,36 +393,19 @@ def test_with_depth_file(inputFn):
     # depthList = [ depths["d0"] ]
 
     lidarPoints = sld.extract( depthList )
-
-    # Output preparation.
-    parts = os.path.split(inputFn)
-
-    # Save the lidar points.
-    save_LIDAR_poinst( "%s/ExtractedLIDARPoints" % ( parts[0] ), VELODYNE_VLP_32C, lidarPoints )
-    save_LIDAR_poinst( "%s/ExtractedLIDARPointsXYZ" % ( parts[0] ), VELODYNE_VLP_32C, lidarPoints, flagXYZ=True )
-
-    xyzList = []
-
-    for p in lidarPoints:
-        xyzList.append( convert_DEA_2_XYZ( p[:, 0], p[:, 1], p[:, 2] ) )
-
-    xyz = np.concatenate( xyzList, axis=0 ) 
-
-    SimplePLY.output_to_ply( "%s/ExtractedLIDARPoints.ply"  % ( parts[0] ), xyz.transpose(), [ len(xyzList), xyzList[0].shape[0]], 50, np.array([0, 0, 0]).reshape((-1,1)) )
+    lidarPoints = lidarPoints.reshape( (-1, 3) )
+    xyz = convert_DEA_2_XYZ( lidarPoints[:, 0], lidarPoints[:, 1], lidarPoints[:, 2] )
+    SimplePLY.output_to_ply( "%s/ExtractedLIDARPoints.ply"  % ( parts[0] ), xyz.transpose(), [ 1, xyz.shape[0] ], 1000, np.array([0, 0, 0]).reshape((-1,1)) )
 
     # Velodyne frame.
-    xyzList = []
-
-    for p in lidarPoints:
-        d, e, a = convert_DEA_from_camera_2_Velodyne( p[:, 0], p[:, 1], p[:, 2] )
-        xyzList.append( convert_Velodyne_DEA_2_XYZ( d, e, a ) )
-
-    xyz = np.concatenate( xyzList, axis=0 ) 
-
-    # SimplePLY.output_to_ply( "%s/ExtractedLIDARPoints_Velodyne.ply" % ( parts[0] ), xyz.transpose(), [ len(xyzList), xyzList[0].shape[0]], 50, np.array([0, 0, 0]).reshape((-1,1)) )
-    save_points_as_ply( "%s/ExtractedLIDARPoints_Velodyne.ply" % ( parts[0] ), xyz.transpose(), len(xyzList), xyzList[0].shape[0], 50 )
+    d, e, a = convert_DEA_from_camera_2_Velodyne( lidarPoints[:, 0], lidarPoints[:, 1], lidarPoints[:, 2] )
+    xyz = convert_Velodyne_DEA_2_XYZ( d, e, a )
+    SimplePLY.output_to_ply( 
+        "%s/ExtractedLIDARPoints_Velodyne.ply" % ( parts[0] ), 
+        xyz.transpose(), [1, xyz.shape[0] ], 100, np.array([0, 0, 0]).reshape((-1,1)) )
 
 if __name__ == "__main__":
+    import argparse
     print("Test SimulatedLIDAR.")
 
     parser = argparse.ArgumentParser(description="Test SimulatedLIDAR.")
@@ -481,7 +415,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # test_dummy_object()
+    test_dummy_object()
 
     if ( args.input != "" ):
         print("Test with %s. " % ( args.input ))
