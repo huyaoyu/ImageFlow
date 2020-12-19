@@ -3,6 +3,9 @@ import copy
 import cv2
 import numpy as np
 
+# Local packages.
+from SimulatedLiDARModel import VELODYNE_VLP_32C, E50_32C
+
 # Global constants
 PI_180 = np.pi / 180
 
@@ -78,42 +81,6 @@ def convert_DEA_from_camera_2_Velodyne_XYZ(d, e, a):
     '''
     d, e, a = convert_DEA_from_camera_2_Velodyne(d, e, a)
     return convert_Velodyne_DEA_2_XYZ(d, e, a)
-
-VELODYNE_VLP_32C = \
-    [
-        { "id":  0, "E":-25,     "flagFlip":True, "resA": 0.1, "offA":  1.4 },
-        { "id":  1, "E":-1,      "flagFlip":True, "resA": 0.1, "offA": -4.2 },
-        { "id":  2, "E":-1.667,  "flagFlip":True, "resA": 0.1, "offA":  1.4 },
-        { "id":  3, "E":-15.639, "flagFlip":True, "resA": 0.1, "offA": -1.4 },
-        { "id":  4, "E":-11.31,  "flagFlip":True, "resA": 0.1, "offA":  1.4 },
-        { "id":  5, "E": 0,      "flagFlip":True, "resA": 0.1, "offA": -1.4 },
-        { "id":  6, "E":-0.667,  "flagFlip":True, "resA": 0.1, "offA":  4.2 },
-        { "id":  7, "E":-8.843,  "flagFlip":True, "resA": 0.1, "offA": -1.4 },
-        { "id":  8, "E":-7.254,  "flagFlip":True, "resA": 0.1, "offA":  1.4 },
-        { "id":  9, "E": 0.333,  "flagFlip":True, "resA": 0.1, "offA": -4.2 },
-        { "id": 10, "E":-0.333,  "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
-        { "id": 11, "E":-6.148,  "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
-        { "id": 12, "E":-5.333,  "flagFlip":True, "resA": 0.1, "offA":  4.2 }, 
-        { "id": 13, "E": 1.333,  "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
-        { "id": 14, "E": 0.667,  "flagFlip":True, "resA": 0.1, "offA":  4.2 }, 
-        { "id": 15, "E":-4,      "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
-        { "id": 16, "E":-4.667,  "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
-        { "id": 17, "E": 1.667,  "flagFlip":True, "resA": 0.1, "offA": -4.2 }, 
-        { "id": 18, "E": 1,      "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
-        { "id": 19, "E":-3.667,  "flagFlip":True, "resA": 0.1, "offA": -4.2 }, 
-        { "id": 20, "E":-3.333,  "flagFlip":True, "resA": 0.1, "offA":  4.2 }, 
-        { "id": 21, "E": 3.333,  "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
-        { "id": 22, "E": 2.333,  "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
-        { "id": 23, "E":-2.667,  "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
-        { "id": 24, "E":-3,      "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
-        { "id": 25, "E": 7,      "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
-        { "id": 26, "E": 4.667,  "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
-        { "id": 27, "E":-2.333,  "flagFlip":True, "resA": 0.1, "offA": -4.2 }, 
-        { "id": 28, "E":-2,      "flagFlip":True, "resA": 0.1, "offA":  4.2 }, 
-        { "id": 29, "E": 15,     "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
-        { "id": 30, "E": 10.333, "flagFlip":True, "resA": 0.1, "offA":  1.4 }, 
-        { "id": 31, "E":-1.333,  "flagFlip":True, "resA": 0.1, "offA": -1.4 }, 
-    ]
 
 class ScanlineParams(object):
     def __init__( self, f, height, aIntervalCheck=False):
@@ -229,7 +196,7 @@ class ScanlineParams(object):
             axis=0 )
         self.e4 = np.tile( self.e, [4] )
 
-class SimulatedLIDAR(object):
+class SimulatedLiDAR(object):
     def __init__(self, f, h, desc=None):
         '''
         Arguments: 
@@ -237,7 +204,7 @@ class SimulatedLIDAR(object):
         h (int): Image height. 
         desc (list of dictionaries): The LiDAR device descrition.
         '''
-        super(SimulatedLIDAR, self).__init__()
+        super(SimulatedLiDAR, self).__init__()
 
         self.f = f 
         self.w = f + f # We are assuming the horizontal FOV is 90 degrees.
@@ -323,11 +290,17 @@ class SimulatedLIDAR(object):
         depth = np.concatenate( depthList, axis=1 )
 
         # Sample depth.
-        # sd = cv2.remap( depth, self.scanlineMaps[0], self.scanlineMaps[1], interpolation=cv2.INTER_LINEAR )
-        sd = cv2.remap( depth, self.scanlineMaps[0], self.scanlineMaps[1], interpolation=cv2.INTER_NEAREST )
+        sdLN = cv2.remap( depth, self.scanlineMaps[0], self.scanlineMaps[1], interpolation=cv2.INTER_LINEAR )
+        sdNR = cv2.remap( depth, self.scanlineMaps[0], self.scanlineMaps[1], interpolation=cv2.INTER_NEAREST )
+
+        # Filter.
+        sdNR = np.clip(sdNR, 1e-6, sdNR.max())
+        diff = np.abs( sdLN - sdNR )
+        mask = diff > 0.1
+        sdLN[mask] = sdNR[mask]
 
         # Convert depth to distance.
-        dist = self.convert_depth_2_distance( self.xCycleArray, self.scanlineMaps[1], sd )
+        dist = self.convert_depth_2_distance( self.xCycleArray, self.scanlineMaps[1], sdLN )
 
         # Threshold the maximum distance.
         if ( maxDist is not None and maxDist > 0 ):
@@ -338,7 +311,7 @@ class SimulatedLIDAR(object):
 def test_dummy_object():
     import SimplePLY
 
-    sld = SimulatedLIDAR( 580, 768 )
+    sld = SimulatedLiDAR( 580, 768 )
     sld.set_description( VELODYNE_VLP_32C )
     sld.initialize()
 
@@ -380,7 +353,7 @@ def test_with_depth_file(inputFn):
     if ( not os.path.isdir(parts[0]) ):
         os.makdirs( parts[0] )
 
-    sld = SimulatedLIDAR( 580, 768 )
+    sld = SimulatedLiDAR( 580, 768 )
     sld.set_description( VELODYNE_VLP_32C )
     sld.initialize()
 
@@ -406,9 +379,9 @@ def test_with_depth_file(inputFn):
 
 if __name__ == "__main__":
     import argparse
-    print("Test SimulatedLIDAR.")
+    print("Test SimulatedLiDAR.")
 
-    parser = argparse.ArgumentParser(description="Test SimulatedLIDAR.")
+    parser = argparse.ArgumentParser(description="Test SimulatedLiDAR.")
 
     parser.add_argument("--input", type=str, default="", \
         help="The input npz file. Leave blank for not testing.")
