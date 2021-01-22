@@ -612,7 +612,9 @@ def single_process_depth(job):
             os.path.join( job["datasetRoot"], job["depth1"] ) )
         bf     = job['bf']
     except Exception as exp:
-        return '%s read error. ' % ( os.path.join( job["datasetRoot"], job["depth0"] ) )
+        f = '%s read error. ' % ( os.path.join( job["datasetRoot"], job["depth0"] ) )
+        print(f)
+        return f
 
     # Calculate the disparity.
     mask = calculate_stereo_disparity_naive( depth0, depth1, bf )
