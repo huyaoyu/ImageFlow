@@ -418,15 +418,16 @@ def calculate_stereo_mask_only_naive(disp0, disp1=None):
 
     return mask
 
-def save_mask(root, subDir, fn0, mask):
+def compose_mask_filename(root, subDir, fn0):
     parts = Utils.get_filename_parts(fn0)
 
     outDir = os.path.join( root, subDir, parts[0] )
     # Utils.test_dir(outDir)
 
-    outFn = os.path.join( outDir, '%s.png' % (parts[1]) )
+    return os.path.join( outDir, '%s.png' % (parts[1]) )
 
-    cv2.imwrite( outFn, mask, [ cv2.IMWRITE_PNG_COMPRESSION, 5 ] )
+def save_mask(outFn, mask):
+    cv2.imwrite( outFn, mask )
 
 def write_masked_image(root, subDir, img0, mask):
     inFn = os.path.join( root, img0 )
@@ -449,7 +450,7 @@ def write_masked_image(root, subDir, img0, mask):
     # Utils.test_dir(outDir)
 
     outFn = os.path.join( outDir, '%s.png' % (parts[1]) )
-    cv2.imwrite(outFn, img, [cv2.IMWRITE_PNG_COMPRESSION, 5])
+    cv2.imwrite(outFn, img)
 
 def handle_script_args(parser):
     parser.add_argument("inputjson", type=str, \
@@ -466,6 +467,9 @@ def handle_script_args(parser):
 
     parser.add_argument("--write-images", action = "store_true", default = False, \
         help="Set this flag to enable writing masked images. ")
+
+    parser.add_argument("--no-overwrite", action="store_true", default = False, \
+        help='Set this flag to skip a job if the target occlusion mask already exists. ')
     
     parser.add_argument("--np", type=int, default=1, \
         help="Number of CPU threads.")
@@ -582,6 +586,12 @@ def single_process_depth(job):
     job: A dictionary contains the following keys:
         idx, depth0, depth1.
     """
+
+    # The target output filename.
+    outFn = compose_mask_filename( job["datasetRoot"], job['occDir'], job["depth0"] )
+    if ( job["flagNoOverwite"] and os.path.isfile(outFn) ):
+        return -1
+
     # Load the depth data.
     depth0 = np.load( 
         os.path.join( job["datasetRoot"], job["depth0"] ) ).astype(NP_FLOAT)
@@ -593,7 +603,7 @@ def single_process_depth(job):
     mask = calculate_stereo_disparity_naive( depth0, depth1, bf )
 
     # Save the disparity and mask.
-    save_mask( job["datasetRoot"], job['occDir'], job["depth0"], mask )
+    save_mask( outFn, mask )
 
     if ( job['flagWriteImage'] ):
         write_masked_image(job['datasetRoot'], job['occDir'], job['img0Fn'], mask)
@@ -619,13 +629,17 @@ def single_process_disp(job):
     job (dict): Contains the job description. 
     '''
 
+    outFn = compose_mask_filename( job['datasetRoot'], job['occDir'], job['disp0Fn'] )
+    if ( job["flagNoOverwite"] and os.path.isfile(outFn) ):
+        return -1
+
     disp0 = read_disp( os.path.join(job['datasetRoot'], job['disp0Fn']) )
     disp1 = read_disp( os.path.join(job['datasetRoot'], job['disp1Fn']) ) \
         if job['disp1Fn'] != 'None' else None
 
     mask = calculate_stereo_mask_only_naive( disp0, disp1 )
 
-    save_mask( job['datasetRoot'], job['occDir'], job['disp0Fn'], mask )
+    save_mask( outFn, mask )
 
     if ( job['flagWriteImage'] ):
         write_masked_image(job['datasetRoot'], job['occDir'], job['img0Fn'], mask)
@@ -826,7 +840,8 @@ def main():
                 "datasetRoot": filesDict["datasetRoot"], \
                 "occDir": args.occdir, \
                 "flagWriteImage": args.write_images, \
-                "img0Fn": imgFn }
+                "img0Fn": imgFn, \
+                "flagNoOverwrite": args.no_overwrite }
 
             jqueue.put(d)
     else:
@@ -845,9 +860,10 @@ def main():
                 'disp1Fn': disp1Fn, \
                 'depth0': '', \
                 'datasetRoot': filesDict['datasetRoot'], \
-                "occDir": args.occdir, \
+                'occDir': args.occdir, \
                 'flagWriteImage': args.write_images, \
-                'img0Fn': imgFn }
+                'img0Fn': imgFn, \
+                'flagNoOverwrite': args.no_overwrite }
 
             jqueue.put(d)
 
