@@ -588,7 +588,7 @@ def load_depth(fn):
     if ( parts[2] == '.npy' ):
         return np.load(fn).astype(NP_FLOAT)
     elif ( parts[2] == '.png' ):
-        depth = cv2.imread(fn).view("<f4")
+        depth = cv2.imread(fn, cv2.IMREAD_UNCHANGED).view("<f4")
         return np.squeeze(depth, axis=-1).astype(NP_FLOAT)
     else:
         raise Exception('Not supported depth format: {}. '.format(parts[2]))
@@ -605,11 +605,14 @@ def single_process_depth(job):
         return -1
 
     # Load the depth data.
-    depth0 = load_depth( 
-        os.path.join( job["datasetRoot"], job["depth0"] ) )
-    depth1 = nload_depth( 
-        os.path.join( job["datasetRoot"], job["depth1"] ) )
-    bf     = job['bf']
+    try:
+        depth0 = load_depth( 
+            os.path.join( job["datasetRoot"], job["depth0"] ) )
+        depth1 = load_depth( 
+            os.path.join( job["datasetRoot"], job["depth1"] ) )
+        bf     = job['bf']
+    except Exception as exp:
+        return '%s read error. ' % ( os.path.join( job["datasetRoot"], job["depth0"] ) )
 
     # Calculate the disparity.
     mask = calculate_stereo_disparity_naive( depth0, depth1, bf )
