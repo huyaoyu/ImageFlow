@@ -581,6 +581,18 @@ def logging_worker(name, jq, p, workingDir, fn):
     
     logger.info("Logger exited.")
 
+def load_depth(fn):
+    assert( os.path.isfile(fn) ), '{} does not exist. '.format(fn)
+
+    parts = Utils.get_filename_parts(fn)
+    if ( parts[2] == '.npy' ):
+        return np.load(fn).astype(NP_FLOAT)
+    elif ( parts[2] == '.png' ):
+        depth = cv2.imread(fn).view("<f4")
+        return np.squeeze(depth, axis=-1).astype(NP_FLOAT)
+    else:
+        raise Exception('Not supported depth format: {}. '.format(parts[2]))
+
 def single_process_depth(job):
     """
     job: A dictionary contains the following keys:
@@ -593,10 +605,10 @@ def single_process_depth(job):
         return -1
 
     # Load the depth data.
-    depth0 = np.load( 
-        os.path.join( job["datasetRoot"], job["depth0"] ) ).astype(NP_FLOAT)
-    depth1 = np.load( 
-        os.path.join( job["datasetRoot"], job["depth1"] ) ).astype(NP_FLOAT)
+    depth0 = load_depth( 
+        os.path.join( job["datasetRoot"], job["depth0"] ) )
+    depth1 = nload_depth( 
+        os.path.join( job["datasetRoot"], job["depth1"] ) )
     bf     = job['bf']
 
     # Calculate the disparity.
@@ -833,7 +845,7 @@ def main():
 
             d = { "idx": i, \
                 "flagDepth": True, \
-                "dispFn": "", \
+                "disp0Fn": "", \
                 "depth0": depth0Fn, \
                 "depth1": filesDict["depthList1"][i], \
                 "bf": filesDict["bf"], \
