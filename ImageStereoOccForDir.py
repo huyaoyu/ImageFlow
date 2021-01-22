@@ -589,7 +589,7 @@ def single_process_depth(job):
 
     # The target output filename.
     outFn = compose_mask_filename( job["datasetRoot"], job['occDir'], job["depth0"] )
-    if ( job["flagNoOverwite"] and os.path.isfile(outFn) ):
+    if ( job["flagNoOverwrite"] and os.path.isfile(outFn) ):
         return -1
 
     # Load the depth data.
@@ -630,7 +630,7 @@ def single_process_disp(job):
     '''
 
     outFn = compose_mask_filename( job['datasetRoot'], job['occDir'], job['disp0Fn'] )
-    if ( job["flagNoOverwite"] and os.path.isfile(outFn) ):
+    if ( job["flagNoOverwrite"] and os.path.isfile(outFn) ):
         return -1
 
     disp0 = read_disp( os.path.join(job['datasetRoot'], job['disp0Fn']) )
