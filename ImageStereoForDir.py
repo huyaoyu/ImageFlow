@@ -213,7 +213,7 @@ def save_disparity_mask_warped(fn0, disp, mask, warped):
     parts = Utils.get_filename_parts(fn0)
 
     np.save( "%s/%s_disp.npy" % (parts[0], parts[1]), disp )
-    np.save( "%s/%s_mask.npy" % (parts[0], parts[1]), mask )
+    # np.save( "%s/%s_mask.npy" % (parts[0], parts[1]), mask )
     
     cv2.imwrite( "%s/%s_disp.png" % (parts[0], parts[1]), 
         convert_single_channel_float_array_2_image(disp) )
