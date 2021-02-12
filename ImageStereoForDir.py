@@ -22,12 +22,29 @@ LOCAL_NP_FLOAT=np.float32
 
 import Utils
 
+from CommonPython.Filesystem import Filesystem
+from CommonPython.ImageIO.ImageRead import read_compressed_float
+from CommonPython.ImageIO.ImageWrite import write_compressed_float
+
 STEREO_OUT_OF_FOV = 11
 
 STEREO_SELF_OCC   = 2
 STEREO_CROSS_OCC  = 1
 
 STEREO_NON_OCC    = 255
+
+def read_depth(fn, dtype=NP_FLOAT):
+    if ( not os.path.isfile(fn) ):
+        raise Exception('%s does not exist' % (fn))
+
+    parts = Filesystem.get_filename_parts(fn)
+
+    if ( '.npy' == parts[2] ):
+        return np.load(fn).astype(dtype)
+    elif ( '.png' == parts[2] ):
+        return read_compressed_float(fn).astype(dtype)
+    else:
+        raise Exception('Unexpected extention {}. '.format(parts[2]))
 
 def warp_by_disparity(img, disp):
     '''
@@ -212,7 +229,9 @@ def convert_mask_2_image(mask):
 def save_disparity_mask_warped(fn0, disp, mask, warped):
     parts = Utils.get_filename_parts(fn0)
 
-    np.save( "%s/%s_disp.npy" % (parts[0], parts[1]), disp )
+    # np.save( "%s/%s_disp.npy" % (parts[0], parts[1]), disp )
+    write_compressed_float( 
+        "%s/%s_disp_lu1.png" % (parts[0], parts[1]), disp )
     # np.save( "%s/%s_mask.npy" % (parts[0], parts[1]), mask )
     
     cv2.imwrite( "%s/%s_disp.png" % (parts[0], parts[1]), 
@@ -311,8 +330,8 @@ def single_process(job, bf):
     bf: baseline * focal length.
     """
     # Load the depth data.
-    depth0 = np.load(job["depth0"]).astype(LOCAL_NP_FLOAT)
-    depth1 = np.load(job["depth1"]).astype(LOCAL_NP_FLOAT)
+    depth0 = read_depth(job["depth0"], LOCAL_NP_FLOAT)
+    depth1 = read_depth(job["depth1"], LOCAL_NP_FLOAT)
 
     # Calculate the disparity.
     disp, mask = calculate_stereo_disparity_naive( depth0, depth1, bf )
