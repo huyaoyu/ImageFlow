@@ -192,7 +192,20 @@ def find_stereo_occlusions_naive(depth_0, depth_1, disp, BF):
             dep1  = depth_1[y, x1]
             ddMax = BF/d**2
 
-            if ( dep0 <= dep1 or dep0 - dep1 <= 2*ddMax):
+            if ( dep0 >= 1000 and dep1 >= 1000):
+                # Both points are at infinity.
+                if ( showDetails ):
+                    print("Both points are at infinity. ")
+            elif ( dep0 - dep1 >= 1000 and dep1 <= 1000 ):
+                # pixel from cam_0 is at infinity.
+                # Occlusion.
+                if ( maskOcc[ y, x0 ] != STEREO_OUT_OF_FOV ):
+                    maskOcc[ y, x0 ] = STEREO_CROSS_OCC
+
+                if ( showDetails ):
+                    print("Infinity-occlusion: Current pixel farther.")
+            elif ( dep0 <= dep1 or dep0 - dep1 <= 2*ddMax):
+                # The pixel from cam_0 is closer.
                 if ( showDetails ):
                     print("Cross-occlusion: Current pixel closer.")
             else:
