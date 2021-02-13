@@ -470,7 +470,7 @@ image_pattern_0: {}
 image_pattern_1: {}
 """.format(args.inputdir, \
         args.depth_pattern_0, args.depth_pattern_1, \
-        arsg.image_pattern_0, args.image_pattern_1 ) )
+        args.image_pattern_0, args.image_pattern_1 ) )
 
     # Compose the dictionary.
     return { "depthList0": depthList0, "depthList1": depthList1, \
